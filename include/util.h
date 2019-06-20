@@ -10,6 +10,22 @@
 #include <inttypes.h>
 
 
+// -------- TYPES ----------------
+
+
+typedef struct { unsigned x, y; } uvec2_t;
+typedef struct { int x, y; } ivec2_t;
+typedef struct { float x, y; } vec2_t;
+
+typedef struct { unsigned x, y, z; } uvec3_t;
+typedef struct { int x, y, z; } ivec3_t;
+typedef struct { float x, y, z; } vec3_t;
+
+typedef struct { unsigned x, y, z, w; } uvec4_t;
+typedef struct { int x, y, z, w; } ivec4_t;
+typedef struct { float x, y, z, w; } vec4_t;
+
+
 // -------- MACROS ----------------
 
 #define warn(msg) fprintf(stderr, "WARN: %s:%s:%d: " msg "\n", __FILE__, __func__, __LINE__)
