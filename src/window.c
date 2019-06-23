@@ -85,3 +85,46 @@ void window_free(struct window *window) {
 	free(window->title);
 	free(window);
 }
+
+
+// Check whether window should close
+bool window_should_close(const struct window *window) {
+	if (!window) {
+		die("NULL window");
+	}
+	return window->should_close;
+}
+
+
+// Set that window should close
+void window_set_should_close(struct window *window) {
+	if (!window) {
+		die("NULL window");
+	}
+	window->should_close = true;
+}
+
+
+// Wait for events on the window and process callbacks
+void window_get_events(struct window *window) {
+	if (!window) {
+		die("NULL window");
+	}
+	if (!window->should_close) {
+		glfwWaitEvents();
+		if (glfwWindowShouldClose(window->window)) {
+			window->should_close = true;
+		}
+	}
+}
+
+
+// Refresh window
+void window_refresh(struct window *window) {
+	if (!window) {
+		die("NULL window");
+	}
+	if (!window->should_close) {
+		glfwSwapBuffers(window->window);
+	}
+}
