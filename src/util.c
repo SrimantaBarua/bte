@@ -1,8 +1,42 @@
+#include "glad/glad.h"
+
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdbool.h>
 
 #include "util.h"
+
+
+// -------- OPENGL ---------------
+
+
+// Check GL errors and die on error
+void _gl_check_error(const char *file, const char *func, int line) {
+	GLenum errcode;
+	const char *msg = "unknown";
+	while ((errcode = glGetError()) != GL_NO_ERROR) {
+		switch (errcode) {
+		case GL_INVALID_ENUM:
+			msg = "INVALID_ENUM";
+			break;
+		case GL_INVALID_VALUE:
+			msg = "INVALID_VALUE";
+			break;
+		case GL_INVALID_OPERATION:
+			msg = "INVALID_OPERATION";
+			break;
+		case GL_OUT_OF_MEMORY:
+			msg = "OUT_OF_MEMORY";
+			break;
+		case GL_INVALID_FRAMEBUFFER_OPERATION:
+			msg = "INVALID_FRAMEBUFFER_OPERATION";
+			break;
+		}
+		fprintf(stderr, "OpenGL error: %s:%s:%d: code: %d: %s\n", file, func, line,
+			errcode, msg);
+		exit(1);
+	}
+}
 
 
 // -------- HASH TABLE ----------------

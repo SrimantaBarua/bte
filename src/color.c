@@ -62,11 +62,11 @@ bool color_parse(struct color *color, const char *s) {
 
 // Fill vector with normalized (0.0 - 1.0) color values
 void color_normalize(const struct color *color, vec4_t *vec) {
-	if (!color|| !vec) {
+	if (!color || !vec) {
 		die("NULL src or dest");
 	}
-	vec->x = color->r / 256.0;
-	vec->y = color->g / 256.0;
-	vec->z = color->b / 256.0;
-	vec->w = color->a / 256.0;
+	vec->x = color->r ? ((float) color->r + 1) / 256.0 : 0.0f;
+	vec->y = color->b ? ((float) color->g + 1) / 256.0 : 0.0f;
+	vec->z = color->b ? ((float) color->b + 1) / 256.0 : 0.0f;
+	vec->w = color->a ? ((float) color->a + 1) / 256.0 : 0.0f;
 }

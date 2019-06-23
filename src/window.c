@@ -6,6 +6,18 @@
 #include "window.h"
 
 
+// Update projection matrix for window
+static void _update_projmat(struct window *window) {
+	memset(window->projmat, 0, sizeof(window->projmat));
+	window->projmat[0] =  2.0 / window->dim.x;
+	window->projmat[5] = 2.0 / window->dim.y;
+	window->projmat[10] = -1.0f;
+	window->projmat[12] = -1.0f;
+	window->projmat[13] = -1.0f;
+	window->projmat[15] = 1.0f;
+}
+
+
 // Guaranteed cleanup of GLFW
 static void glfw_cleanup() {
 	glfwTerminate();
@@ -14,26 +26,50 @@ static void glfw_cleanup() {
 
 // Callback for resize
 static void _glfw_fb_resize_cb(GLFWwindow *window, int width, int height) {
+	struct window *w;
+	if (width <= 0 || height <= 0) {
+		return;
+	}
+	w = (struct window*) glfwGetWindowUserPointer(window);
+	w->dim.x = width;
+	w->dim.y = height;
+	_update_projmat(w);
+	if (w->renderer) {
+		renderer_resize(w->renderer);
+	}
 }
 
 
 // Callback for keypresses
 static void _glfw_key_cb(GLFWwindow *window, int key, int scancode, int action, int mods) {
 	// TODO
+	struct window *w = (struct window*) glfwGetWindowUserPointer(window);
+	if (action == GLFW_PRESS && key == GLFW_KEY_ENTER) {
+		if (w->renderer) {
+			renderer_add_codepoint(w->renderer, '\n');
+			renderer_render(w->renderer);
+		}
+	}
 }
 
 
 // Callback for unicode codepoints
 static void _glfw_char_cb(GLFWwindow *window, uint32_t codepoint) {
 	// TODO
+	struct window *w = (struct window*) glfwGetWindowUserPointer(window);
+	if (w->renderer) {
+		renderer_add_codepoint(w->renderer, codepoint);
+		renderer_render(w->renderer);
+	}
+
 }
 
 
 // Create a new window, and initialize OpenGL context
 struct window* window_new(unsigned width, unsigned height, const char *title) {
 	struct window *window;
-	if (!(window = malloc(sizeof(struct window)))) {
-		die_err("malloc()");
+	if (!(window = calloc(1, sizeof(struct window)))) {
+		die_err("calloc()");
 	}
 	if (!(window->title = strdup(title))) {
 		die_err("strdup()");
@@ -65,12 +101,30 @@ struct window* window_new(unsigned width, unsigned height, const char *title) {
 	if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
 		die("Failed to initialize GLAD");
 	}
+	// Clear out spurious errors
+	while (glGetError() != GL_NO_ERROR);
+	// Setup viewport
 	glViewport(0, 0, width, height);
+	gl_check_error();
 	// Enable blending
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	// Update projection matrix
+	_update_projmat(window);
 	// Return window
 	return window;
+}
+
+
+// Set renderer pointer for window
+void window_set_renderer(struct window *window, struct renderer *renderer) {
+	if (!window) {
+		die("NULL window");
+	}
+	if (!renderer) {
+		die("NULL renderer");
+	}
+	window->renderer = renderer;
 }
 
 

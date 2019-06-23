@@ -10,6 +10,13 @@
 #include <inttypes.h>
 
 
+// -------- OPENGL UTILITY ----------------
+
+
+// Check GL errors and die on error
+void _gl_check_error(const char *file, const char *func, int line);
+
+
 // -------- TYPES ----------------
 
 
@@ -56,6 +63,9 @@ typedef struct { float x, y, z, w; } vec4_t;
 	fprintf(stderr, "ERR: %s:%s:%d: " msg ": %s\n", __FILE__, __func__, __LINE__, strerror(errno)); \
 	exit(1); \
 } while(0)
+
+// Macro for checking GL errors
+#define gl_check_error() _gl_check_error(__FILE__, __func__, __LINE__)
 
 
 // -------- HASH TABLE ----------------

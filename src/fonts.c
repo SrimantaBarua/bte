@@ -1,3 +1,5 @@
+#include "glad/glad.h"
+
 #include <stdlib.h>
 #include <fontconfig/fontconfig.h>
 
@@ -37,7 +39,6 @@ struct fonts* fonts_new(const char *default_font, unsigned font_sz) {
 	FT_Face face;
 	unsigned c, glyph_idx, line_ht = 0, line_sp = 0;
 	struct glyph *glyph;
-	float xoff = 0.0f;
 	// Allocate fonts
 	if (!(fonts = calloc(1, sizeof(struct fonts)))) {
 		die_err("calloc()");
@@ -65,29 +66,6 @@ struct fonts* fonts_new(const char *default_font, unsigned font_sz) {
 	fonts->faces = list_new(face);
 	// Disable byte alignment restriction
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-	// Get ASCII glyph dimensions
-	for (c = 32; c < 128; c++) {
-		glyph_idx = FT_Get_Char_Index(face, c);
-		if (FT_Load_Glyph(face, glyph_idx, FT_LOAD_RENDER)) {
-			warn_fmt("Could not load glyph for codepoint: %u\n", c);
-			continue;
-		}
-		fonts->atlas_dim.x += face->glyph->bitmap.width;
-		if (fonts->atlas_dim.y < face->glyph->bitmap.rows) {
-			fonts->atlas_dim.y = face->glyph->bitmap.rows;
-		}
-	}
-	// Generate texture atlas
-	glGenTextures(1, &fonts->atlas_tex_id);
-	glBindTexture(GL_TEXTURE_2D, fonts->atlas_tex_id);
-	// Set texture options
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	// Generate empty texture
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, fonts->atlas_dim.x, fonts->atlas_dim.y, 0, GL_RED,
-			GL_UNSIGNED_BYTE, 0);
 	// Load ASCII glyphs
 	for (c = 32; c < 128; c++) {
 		glyph_idx = FT_Get_Char_Index(face, c);
@@ -104,14 +82,17 @@ struct fonts* fonts_new(const char *default_font, unsigned font_sz) {
 		glyph->bearing.x = face->glyph->bitmap_left;
 		glyph->bearing.y = face->glyph->bitmap_top;
 		glyph->advance_x = face->glyph->advance.x;
-		glyph->tex_x = xoff;
-		htu32_set(fonts->glyphs, c, glyph);
+		// Generate texture atlas
+		glGenTextures(1, &glyph->tex);
+		glBindTexture(GL_TEXTURE_2D, glyph->tex);
+		// Set texture options
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		// Update texture data
-		glTexSubImage2D(GL_TEXTURE_2D, 0, xoff, 0, face->glyph->bitmap.width,
-				face->glyph->bitmap.rows, GL_RED, GL_UNSIGNED_BYTE,
-				face->glyph->bitmap.buffer);
-		// Update texture offset
-		xoff += face->glyph->bitmap.width;
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, glyph->size.x, glyph->size.y, 0, GL_RED,
+				GL_UNSIGNED_BYTE, face->glyph->bitmap.buffer);
 		// Update advance and line height
 		if (face->glyph->advance.x > 0 && face->glyph->advance.x > fonts->advance.x) {
 			fonts->advance.x = face->glyph->advance.x;
@@ -122,6 +103,8 @@ struct fonts* fonts_new(const char *default_font, unsigned font_sz) {
 		if (line_sp + glyph->bearing.y < glyph->size.y) {
 			line_sp = glyph->size.y - glyph->bearing.y;
 		}
+		// Store in hash table
+		htu32_set(fonts->glyphs, c, glyph);
 	}
 	// Compute metrics
 	fonts->advance.x >>= 6;
@@ -133,8 +116,20 @@ struct fonts* fonts_new(const char *default_font, unsigned font_sz) {
 		fonts->advance.y = 1;
 	}
 	fonts->line_height = line_ht;
+	// Unbind texture
+	glBindTexture(GL_TEXTURE_2D, 0);
 	// Return font
 	return fonts;
+}
+
+
+// Free a glyph
+static void _glyph_free(struct glyph *glyph) {
+	if (!glyph) {
+		return;
+	}
+	glDeleteTextures(1, &glyph->tex);
+	free(glyph);
 }
 
 
@@ -143,7 +138,7 @@ void fonts_free(struct fonts *fonts) {
 	if (!fonts) {
 		warn("NULL fonts");
 	}
-	htu32_free(fonts->glyphs, free);
+	htu32_free(fonts->glyphs, (free_cb_t) _glyph_free);
 	list_free(fonts->faces, (free_cb_t) FT_Done_Face);
 	FT_Done_FreeType(fonts->ft_lib);
 	free(fonts);

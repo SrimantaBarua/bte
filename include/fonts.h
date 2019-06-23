@@ -2,8 +2,6 @@
 #define __BTE_FONTS_H__
 
 
-#include "glad/glad.h"
-
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
@@ -12,10 +10,10 @@
 
 // Information about a glyph
 struct glyph {
-	ivec2_t bearing;   // Bearing
-	uvec2_t size;      // Bitmap size
-	int     advance_x; // Advance to next character
-	float   tex_x;     // Offset of glyph in texture atlas
+	ivec2_t  bearing;   // Bearing
+	uvec2_t  size;      // Bitmap size
+	unsigned tex;       // Glyph texture
+	int      advance_x; // Advance to next character
 };
 
 
@@ -27,9 +25,6 @@ struct fonts {
 	// Freetype
 	FT_Library   ft_lib;        // Handle to Freetype2 library
 	struct list  *faces;        // List of faces
-	// Texture atlas
-	GLuint       atlas_tex_id;  // Texture atlas ID
-	uvec2_t      atlas_dim;     // Texture atlas dimensions
 };
 
 // Initialize font-loading subsystem

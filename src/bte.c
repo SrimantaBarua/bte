@@ -4,6 +4,7 @@
 #include "fonts.h"
 #include "color.h"
 #include "window.h"
+#include "render.h"
 
 
 #define BTE_WIDTH    1360
@@ -21,27 +22,17 @@ const char *BTE_COLOR_PALETTE[256] = {
 int main(int argc, const char **argv, const char **envp) {
 	struct window * window;
 	struct fonts *fonts;
-	struct color color_fg, color_bg;
-	vec4_t bg_normalized;
+	struct renderer *renderer;
 
 	setlocale(LC_ALL, "");
 
-	if (!color_parse(&color_fg, BTE_COLOR_FG)) {
-		die_fmt("Could not parse foreground color: %s", BTE_COLOR_FG);
-	}
-	if (!color_parse(&color_bg, BTE_COLOR_BG)) {
-		die_fmt("Could not parse background color: %s", BTE_COLOR_BG);
-	}
-	color_normalize(&color_bg, &bg_normalized);
-
 	window = window_new(BTE_WIDTH, BTE_HEIGHT, BTE_TITLE);
 	fonts = fonts_new("monospace", 12);
+	renderer = renderer_new(window, fonts, BTE_COLOR_FG, BTE_COLOR_BG);
+	window_set_renderer(window, renderer);
 
 	while (!window_should_close(window)) {
 		window_get_events(window);
-		glClearColor(bg_normalized.x, bg_normalized.y, bg_normalized.z, bg_normalized.w);
-		glClear(GL_COLOR_BUFFER_BIT);
-		window_refresh(window);
 	}
 
 	fonts_free(fonts);

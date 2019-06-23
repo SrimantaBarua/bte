@@ -6,19 +6,25 @@
 #include <stdbool.h>
 
 #include "util.h"
+#include "render.h"
 
 
 // Store information about a window
 struct window {
-	GLFWwindow *window;      // GLFW window
-	GLFWcursor *cursor;      // GLFW cursor
-	uvec2_t    dim;          // Window dimensions
-	char       *title;       // Window title
-	bool       should_close; // Whether window should close
+	GLFWwindow      *window;      // GLFW window
+	GLFWcursor      *cursor;      // GLFW cursor
+	uvec2_t         dim;          // Window dimensions
+	char            *title;       // Window title
+	bool            should_close; // Whether window should close
+	float           projmat[16];  // Projection matrix
+	struct renderer *renderer;    // Pointer to renderer (not owned);
 };
 
 // Create a new window, and initialize OpenGL context
 struct window* window_new(unsigned width, unsigned height, const char *title);
+
+// Set renderer pointer for window
+void window_set_renderer(struct window *window, struct renderer *renderer);
 
 // Check whether window should close
 bool window_should_close(const struct window *window);
