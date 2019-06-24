@@ -24,6 +24,7 @@ struct renderer {
 	// Misc
 	vec4_t              fgcol;       // Normalized default text color
 	vec4_t              bgcol;       // Normalized background color
+	bool                req_render;  // Has an updated render been requested?
 };
 
 
@@ -33,8 +34,12 @@ struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg,
 // Free renderer resources
 void renderer_free(struct renderer *renderer);
 
-// Render current contents
-void renderer_render(const struct renderer *renderer);
+// Denote that the renderer should render the current scene. Not guaranteed to be carried out
+// immediately
+void renderer_render(struct renderer *renderer);
+
+// Do whatever the renderer needs to do
+void renderer_update(struct renderer *renderer);
 
 // Add character
 void renderer_add_codepoint(struct renderer *renderer, uint32_t codepoint);

@@ -6,6 +6,7 @@
 #include <stdbool.h>
 
 #include "util.h"
+#include "child.h"
 #include "render.h"
 
 
@@ -17,7 +18,8 @@ struct window {
 	char            *title;       // Window title
 	bool            should_close; // Whether window should close
 	float           projmat[16];  // Projection matrix
-	struct renderer *renderer;    // Pointer to renderer (not owned);
+	struct renderer *renderer;    // Pointer to renderer (not owned)
+	struct child    *child;       // Pointer to child (not owned)
 };
 
 // Create a new window, and initialize OpenGL context
@@ -25,6 +27,9 @@ struct window* window_new(unsigned width, unsigned height, const char *title);
 
 // Set renderer pointer for window
 void window_set_renderer(struct window *window, struct renderer *renderer);
+
+// Set child pointer for window
+void window_set_child(struct window *window, struct child *child);
 
 // Check whether window should close
 bool window_should_close(const struct window *window);

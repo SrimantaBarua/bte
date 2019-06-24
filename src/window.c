@@ -45,11 +45,11 @@ static void _glfw_fb_resize_cb(GLFWwindow *window, int width, int height) {
 static void _glfw_key_cb(GLFWwindow *window, int key, int scancode, int action, int mods) {
 	// TODO
 	struct window *w = (struct window*) glfwGetWindowUserPointer(window);
-	if (action == GLFW_PRESS && key == GLFW_KEY_ENTER) {
-		if (w->renderer) {
-			renderer_add_codepoint(w->renderer, '\n');
-			renderer_render(w->renderer);
-		}
+	if (action == GLFW_RELEASE) {
+		return;
+	}
+	if (w->child) {
+		child_key_cb(w->child, key, mods);
 	}
 }
 
@@ -58,9 +58,8 @@ static void _glfw_key_cb(GLFWwindow *window, int key, int scancode, int action, 
 static void _glfw_char_cb(GLFWwindow *window, uint32_t codepoint) {
 	// TODO
 	struct window *w = (struct window*) glfwGetWindowUserPointer(window);
-	if (w->renderer) {
-		renderer_add_codepoint(w->renderer, codepoint);
-		renderer_render(w->renderer);
+	if (w->child) {
+		child_char_cb(w->child, codepoint);
 	}
 
 }
@@ -126,6 +125,15 @@ void window_set_renderer(struct window *window, struct renderer *renderer) {
 }
 
 
+// Set child pointer for window
+void window_set_child(struct window *window, struct child *child) {
+	if (!window) {
+		die("NULL window");
+	}
+	window->child = child;
+}
+
+
 // Free window resources
 void window_free(struct window *window) {
 	if (!window) {
@@ -163,7 +171,7 @@ void window_get_events(struct window *window) {
 		die("NULL window");
 	}
 	if (!window->should_close) {
-		glfwWaitEvents();
+		glfwPollEvents();
 		if (glfwWindowShouldClose(window->window)) {
 			window->should_close = true;
 		}

@@ -150,7 +150,7 @@ void renderer_free(struct renderer *renderer) {
 
 
 // Render current contents
-void renderer_render(const struct renderer *r) {
+static void _do_render(struct renderer *r) {
 	const struct glyph *glyph;
 	GLfloat xpos, ypos, width, height;
 	GLfloat vertices[6][4] = {
@@ -163,10 +163,6 @@ void renderer_render(const struct renderer *r) {
 	};
 	GLuint loc_text_color, loc_proj_mat;
 	unsigned i, j;
-
-	if (!r) {
-		die("NULL renderer");
-	}
 
 	// Clear window
 	glClearColor(r->bgcol.x, r->bgcol.y, r->bgcol.z, r->bgcol.w);
@@ -226,6 +222,27 @@ void renderer_render(const struct renderer *r) {
 }
 
 
+// Denote that renderer should render contents
+void renderer_render(struct renderer *r) {
+	if (!r) {
+		die("NULL renderer");
+	}
+	r->req_render = true;
+}
+
+
+// Do whatever the renderer needs to do
+void renderer_update(struct renderer *r) {
+	if (!r) {
+		die("NULL renderer");
+	}
+	if (r->req_render) {
+		_do_render(r);
+	}
+	r->req_render = false;
+}
+
+
 // Add character
 void renderer_add_codepoint(struct renderer *r, uint32_t cp) {
 	const  struct glyph *glyph;
@@ -250,10 +267,10 @@ void renderer_add_codepoint(struct renderer *r, uint32_t cp) {
 		} else {
 			r->termbox[r->cursor.y * r->dim.x + r->cursor.x] = glyph;
 		}
+		r->cursor.x++;
 	}
 
 	// Is this default behaviour?
-	r->cursor.x++;
 	if (r->cursor.x >= r->dim.x) {
 		r->cursor.x = 0;
 		r->cursor.y++;
