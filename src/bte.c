@@ -35,6 +35,8 @@ int main(int argc, const char **argv, const char **envp) {
 		window_get_events(window);
 	}
 
+	window_set_renderer(window, NULL);
+	renderer_free(renderer);
 	fonts_free(fonts);
 	window_free(window);
 

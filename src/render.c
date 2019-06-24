@@ -261,7 +261,7 @@ void renderer_add_codepoint(struct renderer *r, uint32_t cp) {
 	if (r->cursor.y >= r->dim.y) {
 		// Scroll 1 line up
 		memcpy(r->termbox, &r->termbox[r->dim.x], r->dim.x * (r->dim.y - 1) * sizeof(struct glyph*));
-		memset(&r->termbox[r->dim.x * (r->dim.y - 1)], 0, r->dim.y * sizeof(struct glyph*));
+		memset(&r->termbox[r->dim.x * (r->dim.y - 1)], 0, r->dim.x * sizeof(struct glyph*));
 		r->cursor.y = r->dim.y - 1;
 	}
 }
@@ -321,6 +321,7 @@ void renderer_move_left(struct renderer *r, unsigned n) {
 
 // Resize renderer to match window (called by window subsystem)
 void renderer_resize(struct renderer *r) {
+	const struct glyph **tmp;
 	if (!r) {
 		die("NULL renderer");
 	}
@@ -328,11 +329,15 @@ void renderer_resize(struct renderer *r) {
 	r->dim.x = r->window->dim.x / r->fonts->advance.x;
 	r->dim.y = r->window->dim.y / r->fonts->advance.y;
 	// Realloc terminal box
-	if (!(r->termbox = realloc(r->termbox, r->dim.x * r->dim.y * sizeof(struct glyph*)))) {
+	if (!(tmp = realloc(r->termbox, r->dim.x * r->dim.y * sizeof(struct glyph*)))) {
 		die_err("realloc()");
 	}
+	r->termbox = tmp;
 	// Move cursor to 0
 	r->cursor.x = 0;
 	r->cursor.y = 0;
+	memset(r->termbox, 0, r->dim.x * r->dim.y * sizeof(struct glyph*));
 	// TODO: Copy data?
+	// Render
+	renderer_render(r);
 }

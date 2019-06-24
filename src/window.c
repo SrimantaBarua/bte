@@ -33,6 +33,7 @@ static void _glfw_fb_resize_cb(GLFWwindow *window, int width, int height) {
 	w = (struct window*) glfwGetWindowUserPointer(window);
 	w->dim.x = width;
 	w->dim.y = height;
+	glViewport(0, 0, width, height);
 	_update_projmat(w);
 	if (w->renderer) {
 		renderer_resize(w->renderer);
@@ -120,9 +121,6 @@ struct window* window_new(unsigned width, unsigned height, const char *title) {
 void window_set_renderer(struct window *window, struct renderer *renderer) {
 	if (!window) {
 		die("NULL window");
-	}
-	if (!renderer) {
-		die("NULL renderer");
 	}
 	window->renderer = renderer;
 }
