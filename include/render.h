@@ -18,25 +18,27 @@ enum renderer_clear_type {
 
 struct renderer {
 	// Terminal box
-	const struct glyph  **termbox;   // Glyphs buffer
-	uvec2_t             dim;         // Dimensions (no. of chars)
-	uvec2_t             cursor;      // Current cursor position
+	const struct glyph  **termbox;     // Glyphs buffer
+	uvec2_t             dim;           // Dimensions (no. of chars)
+	uvec2_t             cursor;        // Current cursor position
+	const struct glyph  *cursor_glyph; // Glyph to draw for cursor
+	bool                cursor_vis;    // Is cursor supposed to be visible?
 	// Pointers to other systems
-	struct window       *window;     // Pointer to window (not owned)
-	struct fonts        *fonts;      // Pointer to fonts subsystem (not owned)
+	struct window       *window;       // Pointer to window (not owned)
+	struct fonts        *fonts;        // Pointer to fonts subsystem (not owned)
 	// OpenGL stuff
 	GLuint              VAO;
 	GLuint              VBO;
-	GLuint              text_shader; // Shader program for text
+	GLuint              text_shader;   // Shader program for text
 	// Misc
-	vec4_t              fgcol;       // Normalized default text color
-	vec4_t              bgcol;       // Normalized background color
-	bool                req_render;  // Has an updated render been requested?
+	vec4_t              fgcol;         // Normalized default text color
+	vec4_t              bgcol;         // Normalized background color
+	bool                req_render;    // Has an updated render been requested?
 };
 
 
 // Create a new renderer
-struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg, const char *bg);
+struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg, const char *bg, uint32_t cursor);
 
 // Free renderer resources
 void renderer_free(struct renderer *renderer);

@@ -126,8 +126,8 @@ void* list_pop_front(struct list **list);
 void* list_pop_end(struct list **list);
 
 // Iterate over list
-#define list_foreach(list, node, val) \
-	for ((node) = (list); (node) && ((val) = (node)->val); (node) = (node)->next)
+#define list_foreach(list, node, data) \
+	for ((node) = (list); (node) && ((data) = (node)->val); (node) = (node)->next)
 
 
 #endif // __BTE_UTIL_H__

@@ -81,7 +81,7 @@ static GLuint _load_shaders(const char *vsrc, const char *fsrc) {
 
 
 // Create a new renderer
-struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg, const char *bg) {
+struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg, const char *bg, uint32_t cursor) {
 	struct renderer *r;
 	struct color fgc, bgc;
 
@@ -134,6 +134,11 @@ struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg,
 	glClearColor(r->bgcol.x, r->bgcol.y, r->bgcol.z, r->bgcol.w);
 	glClear(GL_COLOR_BUFFER_BIT);
 	window_refresh(r->window);
+	// Get cursor glyph and set cursor visible
+	if (r->fonts) {
+		r->cursor_glyph = fonts_get_glyph(r->fonts, cursor);
+	}
+	r->cursor_vis = true;
 	return r;
 }
 
@@ -152,10 +157,8 @@ void renderer_free(struct renderer *renderer) {
 }
 
 
-// Render current contents
-static void _do_render(struct renderer *r) {
-	const struct glyph *glyph;
-	GLfloat xpos, ypos, width, height;
+// Render glyph
+static void _render_glyph(struct renderer *r, unsigned i, unsigned j, const struct glyph *glyph) {
 	GLfloat vertices[6][4] = {
 		{ 0.0f, 0.0f, 0.0f, 0.0f },
 		{ 0.0f, 0.0f, 0.0f, 1.0f },
@@ -164,6 +167,41 @@ static void _do_render(struct renderer *r) {
 		{ 0.0f, 0.0f, 1.0f, 1.0f },
 		{ 0.0f, 0.0f, 1.0f, 0.0f },
 	};
+	GLfloat xpos, ypos, width, height;
+	// Load texture
+	glBindTexture(GL_TEXTURE_2D, glyph->tex);
+	// Calculate dimensions
+	xpos = (j * r->fonts->advance.x + glyph->bearing.x);
+	ypos = i * r->fonts->advance.y + r->fonts->line_height \
+	       + glyph->size.y - glyph->bearing.y;
+	ypos = r->window->dim.y - ypos;
+	width = glyph->size.x;
+	height = glyph->size.y;
+	// Update vertices
+	vertices[0][0] = xpos;
+	vertices[0][1] = ypos + height;
+	vertices[1][0] = xpos;
+	vertices[1][1] = ypos;
+	vertices[2][0] = xpos + width;
+	vertices[2][1] = ypos;
+	vertices[3][0] = xpos;
+	vertices[3][1] = ypos + height;
+	vertices[4][0] = xpos + width;
+	vertices[4][1] = ypos;
+	vertices[5][0] = xpos + width;
+	vertices[5][1] = ypos + height;
+	// Update VBO
+	glBindBuffer(GL_ARRAY_BUFFER, r->VBO);
+	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	// Render quad
+	glDrawArrays(GL_TRIANGLES, 0, 6);
+}
+
+
+// Render current contents
+static void _do_render(struct renderer *r, bool draw_cursor) {
+	const struct glyph *glyph;
 	GLuint loc_text_color, loc_proj_mat;
 	unsigned i, j;
 
@@ -181,37 +219,21 @@ static void _do_render(struct renderer *r) {
 
 	for (i = 0; i < r->dim.y; i++) {
 		for (j = 0; j < r->dim.x; j++) {
-			if (!(glyph = r->termbox[i * r->dim.x + j])) {
-				continue;
+			if (i == r->cursor.y && j == r->cursor.x && draw_cursor && r->cursor_glyph) {
+				_render_glyph(r, i, j, r->cursor_glyph);
+				glUniform3f(loc_text_color, r->bgcol.x, r->bgcol.y, r->bgcol.z);
+				if (!(glyph = r->termbox[i * r->dim.x + j])) {
+					glUniform3f(loc_text_color, r->fgcol.x, r->fgcol.y, r->fgcol.z);
+					continue;
+				}
+				_render_glyph(r, i, j, glyph);
+				glUniform3f(loc_text_color, r->fgcol.x, r->fgcol.y, r->fgcol.z);
+			} else {
+				if (!(glyph = r->termbox[i * r->dim.x + j])) {
+					continue;
+				}
+				_render_glyph(r, i, j, glyph);
 			}
-			// Load texture
-			glBindTexture(GL_TEXTURE_2D, glyph->tex);
-			// Calculate dimensions
-			xpos = (j * r->fonts->advance.x + glyph->bearing.x);
-			ypos = i * r->fonts->advance.y + r->fonts->line_height \
-			       + glyph->size.y - glyph->bearing.y;
-			ypos = r->window->dim.y - ypos;
-			width = glyph->size.x;
-			height = glyph->size.y;
-			// Update vertices
-			vertices[0][0] = xpos;
-			vertices[0][1] = ypos + height;
-			vertices[1][0] = xpos;
-			vertices[1][1] = ypos;
-			vertices[2][0] = xpos + width;
-			vertices[2][1] = ypos;
-			vertices[3][0] = xpos;
-			vertices[3][1] = ypos + height;
-			vertices[4][0] = xpos + width;
-			vertices[4][1] = ypos;
-			vertices[5][0] = xpos + width;
-			vertices[5][1] = ypos + height;
-			// Update VBO
-			glBindBuffer(GL_ARRAY_BUFFER, r->VBO);
-			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-			glBindBuffer(GL_ARRAY_BUFFER, 0);
-			// Render quad
-			glDrawArrays(GL_TRIANGLES, 0, 6);
 		}
 	}
 
@@ -240,7 +262,7 @@ void renderer_update(struct renderer *r) {
 		die("NULL renderer");
 	}
 	if (r->req_render) {
-		_do_render(r);
+		_do_render(r, r->cursor_vis);
 	}
 	r->req_render = false;
 }

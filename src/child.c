@@ -12,6 +12,23 @@
 #include "child.h"
 
 
+#if 1
+
+#define print_codepoint(cp) do { \
+	if ((cp) >= 32) { \
+		printf("codepoint: %u : %c\n", (cp), (cp)); \
+	} else { \
+		printf("codepoint: %u\n", (cp)); \
+	} \
+} while (0)
+
+#else
+
+#define print_codepoint(cp)
+
+#endif
+
+
 // An escape sequence
 struct esc_seq {
 	unsigned nparam;     // Number of parameters
@@ -134,55 +151,74 @@ static uint32_t _next_codepoint(struct child *child) {
 
 
 static void _process_esc(struct child *child, struct esc_seq *esc) {
+	unsigned i;
 	if (!child->renderer) {
 		return;
 	}
-	switch (esc->final) {
-	case 'A':
-		if (esc->nparam == 0) {
-			esc->params[0] = 1;
+	printf("Escape: \\x1b[");
+	if (esc->private) {
+		printf("%c", esc->private);
+	}
+	for (i = 0; i + 1 < esc->nparam; i++) {
+		printf("%u;", esc->params[i]);
+	}
+	if (i < esc->nparam) {
+		printf("%u", esc->params[i]);
+	}
+	printf("%c\n", esc->final);
+	if (esc->private == 0) {
+		switch (esc->final) {
+		// Cursor position
+		case 'A':
+			if (esc->nparam == 0) {
+				esc->params[0] = 1;
+			}
+			renderer_move_up(child->renderer, esc->params[0]);
+			return;
+		case 'B':
+			if (esc->nparam == 0) {
+				esc->params[0] = 1;
+			}
+			renderer_move_down(child->renderer, esc->params[0]);
+			return;
+		case 'C':
+			if (esc->nparam == 0) {
+				esc->params[0] = 1;
+			}
+			renderer_move_right(child->renderer, esc->params[0]);
+			return;
+		case 'D':
+			if (esc->nparam == 0) {
+				esc->params[0] = 1;
+			}
+			renderer_move_left(child->renderer, esc->params[0]);
+			return;
+		case 'H':
+			if (esc->nparam == 1) {
+				esc->params[1] = 1;
+			}
+			if (esc->nparam == 0) {
+				esc->params[0] = 1;
+			}
+			renderer_move_yx(child->renderer, esc->params[0], esc->params[1]);
+			return;
+		// Clear line/screen
+		case 'J':
+			if (esc->nparam == 0) {
+				esc->params[0] = 0;
+			}
+			renderer_clear_screen(child->renderer, esc->params[0]);
+			return;
+		case 'K':
+			if (esc->nparam == 0) {
+				esc->params[0] = 0;
+			}
+			renderer_clear_line(child->renderer, esc->params[0]);
+			return;
+		// Attributes
+		case 'm':
+			return;
 		}
-		renderer_move_up(child->renderer, esc->params[0]);
-		break;
-	case 'B':
-		if (esc->nparam == 0) {
-			esc->params[0] = 1;
-		}
-		renderer_move_down(child->renderer, esc->params[0]);
-		break;
-	case 'C':
-		if (esc->nparam == 0) {
-			esc->params[0] = 1;
-		}
-		renderer_move_right(child->renderer, esc->params[0]);
-		break;
-	case 'D':
-		if (esc->nparam == 0) {
-			esc->params[0] = 1;
-		}
-		renderer_move_left(child->renderer, esc->params[0]);
-		break;
-	case 'H':
-		if (esc->nparam == 1) {
-			esc->params[1] = 1;
-		}
-		if (esc->nparam == 0) {
-			esc->params[0] = 1;
-		}
-		renderer_move_yx(child->renderer, esc->params[0], esc->params[1]);
-		break;
-	case 'J':
-		if (esc->nparam == 0) {
-			esc->params[0] = 0;
-		}
-		renderer_clear_screen(child->renderer, esc->params[0]);
-		break;
-	case 'K':
-		if (esc->nparam == 0) {
-			esc->params[0] = 0;
-		}
-		renderer_clear_line(child->renderer, esc->params[0]);
-		break;
 	}
 }
 
@@ -198,13 +234,7 @@ static void* _reader_thread(void *arg) {
 		if ((cp = _next_codepoint(child)) == UINT32_MAX) {
 			break;
 		}
-		/*
-		if (cp >= 32) {
-			printf("codepoint: %u : %c\n", cp, cp);
-		} else {
-			printf("codepoint: %u\n", cp);
-		}
-		*/
+		print_codepoint(cp);
 
 		if (!child->renderer) {
 			continue;
@@ -219,13 +249,7 @@ static void* _reader_thread(void *arg) {
 				continue;
 			}
 
-			/*
-			if (cp >= 32) {
-				printf("codepoint: %u : %c\n", cp, cp);
-			} else {
-				printf("codepoint: %u\n", cp);
-			}
-			*/
+			print_codepoint(cp);
 
 			param = 0;
 			in_num = false;
@@ -235,13 +259,7 @@ static void* _reader_thread(void *arg) {
 					goto out;
 				}
 
-				/*
-				if (cp >= 32) {
-					printf("codepoint: %u : %c\n", cp, cp);
-				} else {
-					printf("codepoint: %u\n", cp);
-				}
-				*/
+				print_codepoint(cp);
 
 				if (cp == '?') {
 					if (in_num) {
@@ -433,4 +451,6 @@ void child_resize_cb(struct child *child) {
 	}
 	// Set child terminal size
 	_set_child_term_size(child->fd, child->renderer->dim.x, child->renderer->dim.y);
+	// Signal child
+	kill(child->pid, SIGWINCH);
 }

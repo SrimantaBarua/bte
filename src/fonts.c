@@ -32,6 +32,42 @@ static char* get_font_file(const char *font_name) {
 }
 
 
+// Load a glyph from a face. Return NULL if not found
+static struct glyph* load_glyph(FT_Face face, uint32_t c) {
+	struct glyph *glyph;
+	unsigned glyph_idx;
+
+	if (!(glyph_idx = FT_Get_Char_Index(face, c))) {
+		return NULL;
+	}
+	if (FT_Load_Glyph(face, glyph_idx, FT_LOAD_RENDER)) {
+		return NULL;
+	}
+	// Allocate glyph and store character data
+	if (!(glyph = malloc(sizeof(struct glyph)))) {
+		die_err("malloc()");
+	}
+	glyph->size.x = face->glyph->bitmap.width;
+	glyph->size.y = face->glyph->bitmap.rows;
+	glyph->bearing.x = face->glyph->bitmap_left;
+	glyph->bearing.y = face->glyph->bitmap_top;
+	glyph->advance_x = face->glyph->advance.x;
+	// Generate texture atlas
+	glGenTextures(1, &glyph->tex);
+	glBindTexture(GL_TEXTURE_2D, glyph->tex);
+	// Set texture options
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	// Update texture data
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, glyph->size.x, glyph->size.y, 0, GL_RED,
+			GL_UNSIGNED_BYTE, face->glyph->bitmap.buffer);
+	// Return
+	return glyph;
+}
+
+
 // Initialize font-loading subsystem
 struct fonts* fonts_new(const char *default_font, unsigned font_sz) {
 	char *file;
@@ -68,34 +104,13 @@ struct fonts* fonts_new(const char *default_font, unsigned font_sz) {
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 	// Load ASCII glyphs
 	for (c = 32; c < 128; c++) {
-		glyph_idx = FT_Get_Char_Index(face, c);
-		if (FT_Load_Glyph(face, glyph_idx, FT_LOAD_RENDER)) {
+		if (!(glyph = load_glyph(face, c))) {
 			warn_fmt("Could not load glyph for codepoint: %u\n", c);
 			continue;
 		}
-		// Allocate glyph and store character data
-		if (!(glyph = malloc(sizeof(struct glyph)))) {
-			die_err("malloc()");
-		}
-		glyph->size.x = face->glyph->bitmap.width;
-		glyph->size.y = face->glyph->bitmap.rows;
-		glyph->bearing.x = face->glyph->bitmap_left;
-		glyph->bearing.y = face->glyph->bitmap_top;
-		glyph->advance_x = face->glyph->advance.x;
-		// Generate texture atlas
-		glGenTextures(1, &glyph->tex);
-		glBindTexture(GL_TEXTURE_2D, glyph->tex);
-		// Set texture options
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		// Update texture data
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, glyph->size.x, glyph->size.y, 0, GL_RED,
-				GL_UNSIGNED_BYTE, face->glyph->bitmap.buffer);
 		// Update advance and line height
-		if (face->glyph->advance.x > 0 && face->glyph->advance.x > fonts->advance.x) {
-			fonts->advance.x = face->glyph->advance.x;
+		if (glyph->advance_x > 0 && glyph->advance_x > fonts->advance.x) {
+			fonts->advance.x = glyph->advance_x;
 		}
 		if (glyph->bearing.y > 0 && glyph->bearing.y > line_ht) {
 			line_ht = glyph->bearing.y;
@@ -148,6 +163,8 @@ void fonts_free(struct fonts *fonts) {
 // Get glyph for codepoint
 const struct glyph* fonts_get_glyph(struct fonts *fonts, uint32_t codepoint) {
 	struct glyph *glyph;
+	struct list *node;
+	FT_Face face;
 	enum htres res;
 	if (!fonts) {
 		die("NULL fonts");
@@ -155,6 +172,13 @@ const struct glyph* fonts_get_glyph(struct fonts *fonts, uint32_t codepoint) {
 	glyph = htu32_get(fonts->glyphs, codepoint, &res);
 	if (res == HTRES_OK) {
 		return glyph;
+	}
+	// Look for glyphs in loaded faces
+	list_foreach(fonts->faces, node, face) {
+		if ((glyph = load_glyph(face, codepoint))) {
+			htu32_set(fonts->glyphs, codepoint, glyph);
+			return glyph;
+		}
 	}
 	// TODO: Handle loading glyph
 	return NULL;

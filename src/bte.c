@@ -10,14 +10,17 @@
 #include "render.h"
 
 
+#define CURSOR_BLOCK      9608
+
 #define BTE_WIDTH    1360
 #define BTE_HEIGHT   720
 #define BTE_TITLE    "bte"
 #define BTE_COLOR_FG "#ffffff"
 #define BTE_COLOR_BG "#222222"
 #define BTE_SHELL    "/bin/sh"
-#define BTE_TERM     "xterm"
-#define BTE_FPS      30
+#define BTE_TERM     "xterm-color"
+#define BTE_FPS      60
+#define BTE_CURSOR   CURSOR_BLOCK
 
 #define TDIFF_NSEC (1000000000UL / BTE_FPS)
 
@@ -82,7 +85,7 @@ int main(int argc, const char **argv, const char **envp) {
 
 	window = window_new(BTE_WIDTH, BTE_HEIGHT, BTE_TITLE);
 	fonts = fonts_new("monospace", 12);
-	renderer = renderer_new(window, fonts, BTE_COLOR_FG, BTE_COLOR_BG);
+	renderer = renderer_new(window, fonts, BTE_COLOR_FG, BTE_COLOR_BG, BTE_CURSOR);
 	window_set_renderer(window, renderer);
 	child = _spawn_child(envp, window, renderer);
 	window_set_child(window, child);
