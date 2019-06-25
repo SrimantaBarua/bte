@@ -9,6 +9,13 @@
 #include "window.h"
 
 
+enum renderer_clear_type {
+	RENDERER_CLEAR_TO_END = 0,
+	RENDERER_CLEAR_FROM_BEG = 1,
+	RENDERER_CLEAR_ALL = 2,
+};
+
+
 struct renderer {
 	// Terminal box
 	const struct glyph  **termbox;   // Glyphs buffer
@@ -55,6 +62,15 @@ void renderer_move_right(struct renderer *renderer, unsigned n);
 
 // Move cursor left by n
 void renderer_move_left(struct renderer *renderer, unsigned n);
+
+// Move cursor to (x, y)
+void renderer_move_yx(struct renderer *renderer, unsigned y, unsigned x);
+
+// Clear screen
+void renderer_clear_screen(struct renderer *renderer, enum renderer_clear_type type);
+
+// Clear line
+void renderer_clear_line(struct renderer *renderer, enum renderer_clear_type type);
 
 // Resize renderer to match window (called by window subsystem)
 void renderer_resize(struct renderer *renderer);

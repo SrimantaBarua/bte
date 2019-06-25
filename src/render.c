@@ -37,6 +37,9 @@ const char *fsrc =
 
 
 
+#define BTE_TABSZ 8
+
+
 // Compile and link vertex and fragment shaders
 static GLuint _load_shaders(const char *vsrc, const char *fsrc) {
 	GLuint vsh, fsh, prog;
@@ -255,6 +258,16 @@ void renderer_add_codepoint(struct renderer *r, uint32_t cp) {
 	}
 
 	switch (cp) {
+	case '\b':
+		if (r->cursor.x > 0) {
+			r->cursor.x--;
+		}
+		return;
+	case '\t':
+		do {
+			r->cursor.x++;
+		} while (r->cursor.x % BTE_TABSZ != 0);
+		break;
 	case '\r':
 		r->cursor.x = 0;
 		return;
@@ -289,6 +302,9 @@ void renderer_move_up(struct renderer *r, unsigned n) {
 	if (!r) {
 		die("NULL renderer");
 	}
+	if (n == 0) {
+		n = 1;
+	}
 	if (r->cursor.y < n) {
 		r->cursor.y = 0;
 	} else {
@@ -301,6 +317,9 @@ void renderer_move_up(struct renderer *r, unsigned n) {
 void renderer_move_down(struct renderer *r, unsigned n) {
 	if (!r) {
 		die("NULL renderer");
+	}
+	if (n == 0) {
+		n = 1;
 	}
 	if (r->cursor.y + n >= r->dim.y) {
 		r->cursor.y = r->dim.y - 1;
@@ -315,6 +334,9 @@ void renderer_move_right(struct renderer *r, unsigned n) {
 	if (!r) {
 		die("NULL renderer");
 	}
+	if (n == 0) {
+		n = 1;
+	}
 	if (r->cursor.x + n >= r->dim.x) {
 		r->cursor.x = r->dim.x - 1;
 	} else {
@@ -327,6 +349,9 @@ void renderer_move_right(struct renderer *r, unsigned n) {
 void renderer_move_left(struct renderer *r, unsigned n) {
 	if (!r) {
 		die("NULL renderer");
+	}
+	if (n == 0) {
+		n = 1;
 	}
 	if (r->cursor.x < n) {
 		r->cursor.x = 0;
@@ -357,4 +382,68 @@ void renderer_resize(struct renderer *r) {
 	// TODO: Copy data?
 	// Render
 	renderer_render(r);
+}
+
+
+// Move cursor to (x, y)
+void renderer_move_yx(struct renderer *r, unsigned y, unsigned x) {
+	if (!r) {
+		die("NULL renderer");
+	}
+	if (y == 0) {
+		r->cursor.y = 0;
+	} else if (y > r->dim.y) {
+		r->cursor.y = r->dim.y - 1;
+	} else {
+		r->cursor.y = y - 1;
+	}
+	if (x == 0) {
+		r->cursor.x = 0;
+	} else if (x > r->dim.x) {
+		r->cursor.x = r->dim.x - 1;
+	} else {
+		r->cursor.x = x - 1;
+	}
+}
+
+
+// Clear screen
+void renderer_clear_screen(struct renderer *r, enum renderer_clear_type type) {
+	unsigned i;
+	if (!r) {
+		die("NULL renderer");
+	}
+	i = r->cursor.y * r->dim.x + r->cursor.x;
+	switch (type) {
+	case RENDERER_CLEAR_TO_END:
+		memset(&r->termbox[i], 0, (r->dim.x * r->dim.y - i) * sizeof(struct glyph*));
+		break;
+	case RENDERER_CLEAR_FROM_BEG:
+		memset(r->termbox, 0, i * sizeof(struct glyph*));
+		break;
+	case RENDERER_CLEAR_ALL:
+		memset(r->termbox, 0, r->dim.x * r->dim.y * sizeof(struct glyph*));
+	}
+}
+
+
+// Clear line
+void renderer_clear_line(struct renderer *r, enum renderer_clear_type type) {
+	unsigned i, j, k;
+	if (!r) {
+		die("NULL renderer");
+	}
+	i = r->cursor.y * r->dim.x;
+	j = r->cursor.y * r->dim.x + r->cursor.x;
+	k = (r->cursor.y + 1) * r->dim.x;
+	switch (type) {
+	case RENDERER_CLEAR_TO_END:
+		memset(&r->termbox[j], 0, (k - j) * sizeof(struct glyph*));
+		break;
+	case RENDERER_CLEAR_FROM_BEG:
+		memset(&r->termbox[i], 0, (j - i) * sizeof(struct glyph*));
+		break;
+	case RENDERER_CLEAR_ALL:
+		memset(&r->termbox[i], 0, (k - i) * sizeof(struct glyph*));
+	}
 }

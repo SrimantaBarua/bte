@@ -12,6 +12,15 @@
 #include "child.h"
 
 
+// An escape sequence
+struct esc_seq {
+	unsigned nparam;     // Number of parameters
+	unsigned params[32]; // Parameters
+	char     final;      // Final character
+	char     private;    // Character denoting private escape sequence
+};
+
+
 static void _set_child_term_size(int fd, unsigned width, unsigned height) {
 	struct winsize ws = { 0 };
 	ws.ws_col = width;
@@ -124,26 +133,161 @@ static uint32_t _next_codepoint(struct child *child) {
 }
 
 
+static void _process_esc(struct child *child, struct esc_seq *esc) {
+	if (!child->renderer) {
+		return;
+	}
+	switch (esc->final) {
+	case 'A':
+		if (esc->nparam == 0) {
+			esc->params[0] = 1;
+		}
+		renderer_move_up(child->renderer, esc->params[0]);
+		break;
+	case 'B':
+		if (esc->nparam == 0) {
+			esc->params[0] = 1;
+		}
+		renderer_move_down(child->renderer, esc->params[0]);
+		break;
+	case 'C':
+		if (esc->nparam == 0) {
+			esc->params[0] = 1;
+		}
+		renderer_move_right(child->renderer, esc->params[0]);
+		break;
+	case 'D':
+		if (esc->nparam == 0) {
+			esc->params[0] = 1;
+		}
+		renderer_move_left(child->renderer, esc->params[0]);
+		break;
+	case 'H':
+		if (esc->nparam == 1) {
+			esc->params[1] = 1;
+		}
+		if (esc->nparam == 0) {
+			esc->params[0] = 1;
+		}
+		renderer_move_yx(child->renderer, esc->params[0], esc->params[1]);
+		break;
+	case 'J':
+		if (esc->nparam == 0) {
+			esc->params[0] = 0;
+		}
+		renderer_clear_screen(child->renderer, esc->params[0]);
+		break;
+	case 'K':
+		if (esc->nparam == 0) {
+			esc->params[0] = 0;
+		}
+		renderer_clear_line(child->renderer, esc->params[0]);
+		break;
+	}
+}
+
+
 static void* _reader_thread(void *arg) {
 	uint32_t cp;
 	struct child *child = (struct child*) arg;
+	struct esc_seq esc = { 0 };
+	bool in_num = false;
+	unsigned param = 0;
+
 	while (1) {
 		if ((cp = _next_codepoint(child)) == UINT32_MAX) {
 			break;
 		}
-		printf("codepoint: %u: %c\n", cp, cp);
+		/*
+		if (cp >= 32) {
+			printf("codepoint: %u : %c\n", cp, cp);
+		} else {
+			printf("codepoint: %u\n", cp);
+		}
+		*/
+
 		if (!child->renderer) {
 			continue;
 		}
+
+		// Beginning of escape sequence?
+		if (cp == 27) {
+			if ((cp = _next_codepoint(child)) == UINT32_MAX) {
+				break;
+			}
+			if (cp != '[') {
+				continue;
+			}
+
+			/*
+			if (cp >= 32) {
+				printf("codepoint: %u : %c\n", cp, cp);
+			} else {
+				printf("codepoint: %u\n", cp);
+			}
+			*/
+
+			param = 0;
+			in_num = false;
+			memset(&esc, 0, sizeof(struct esc_seq));
+			while (1) {
+				if ((cp = _next_codepoint(child)) == UINT32_MAX) {
+					goto out;
+				}
+
+				/*
+				if (cp >= 32) {
+					printf("codepoint: %u : %c\n", cp, cp);
+				} else {
+					printf("codepoint: %u\n", cp);
+				}
+				*/
+
+				if (cp == '?') {
+					if (in_num) {
+						if (esc.nparam < sizeof(esc.params) / sizeof(esc.params[0])) {
+							esc.params[esc.nparam++] = param;
+						}
+					}
+					esc.private = '?';
+					continue;
+				}
+				if (cp == ';') {
+					if (esc.nparam < sizeof(esc.params) / sizeof(esc.params[0])) {
+						esc.params[esc.nparam++] = param;
+					}
+					param = 0;
+					in_num = false;
+					continue;
+				}
+				if (cp >= '0' && cp <= '9') {
+					in_num = true;
+					param = param * 10 + (cp - '0');
+					continue;
+				}
+				if (esc.nparam < sizeof(esc.params) / sizeof(esc.params[0])) {
+					esc.params[esc.nparam++] = param;
+				}
+				esc.final = cp;
+				break;
+			}
+			_process_esc(child, &esc);
+			renderer_render(child->renderer);
+			continue;
+		}
+
 		if (cp == '\a') {
 			continue;
 		}
 		renderer_add_codepoint(child->renderer, cp);
 		renderer_render(child->renderer);
 	}
+
+out:
 	if (child->window) {
 		window_set_should_close(child->window);
 	}
+
 	return NULL;
 }
 
