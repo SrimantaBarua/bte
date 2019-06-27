@@ -16,9 +16,17 @@ enum renderer_clear_type {
 };
 
 
+struct termchar {
+	const struct glyph *glyph;  // Glyph to draw
+	vec4_t             fgcol;   // Foreground color
+	vec4_t             bgcol;   // Background color
+	bool               to_draw; // Is this to be rendered?
+};
+
+
 struct renderer {
 	// Terminal box
-	const struct glyph  **termbox;     // Glyphs buffer
+	struct termchar     *termbox;      // Glyphs buffer
 	uvec2_t             dim;           // Dimensions (no. of chars)
 	uvec2_t             cursor;        // Current cursor position
 	const struct glyph  *cursor_glyph; // Glyph to draw for cursor
@@ -27,12 +35,17 @@ struct renderer {
 	struct window       *window;       // Pointer to window (not owned)
 	struct fonts        *fonts;        // Pointer to fonts subsystem (not owned)
 	// OpenGL stuff
-	GLuint              VAO;
-	GLuint              VBO;
+	GLuint              VAO_text;
+	GLuint              VBO_text;
 	GLuint              text_shader;   // Shader program for text
+	GLuint              VAO_bg;
+	GLuint              VBO_bg;
+	GLuint              bg_shader;     // Shader program for background
 	// Misc
-	vec4_t              fgcol;         // Normalized default text color
+	vec4_t              fgcol;         // Normalized foreground color
 	vec4_t              bgcol;         // Normalized background color
+	vec4_t              default_fgcol; // Normalized default foreground color
+	vec4_t              default_bgcol; // Normalized default background color
 	bool                req_render;    // Has an updated render been requested?
 };
 
@@ -76,6 +89,18 @@ void renderer_clear_line(struct renderer *renderer, enum renderer_clear_type typ
 
 // Resize renderer to match window (called by window subsystem)
 void renderer_resize(struct renderer *renderer);
+
+// Set renderer foreground color
+void renderer_set_fgcol(struct renderer *renderer, const struct color *color);
+
+// Set renderer background color
+void renderer_set_bgcol(struct renderer *renderer, const struct color *color);
+
+// Reset renderer foreground color
+void renderer_reset_fgcol(struct renderer *renderer);
+
+// Reset renderer background color
+void renderer_reset_bgcol(struct renderer *renderer);
 
 
 #endif // __BTE_RENDER_H__

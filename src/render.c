@@ -7,12 +7,8 @@
 #include "render.h"
 
 
-const char *vtxtsrc = "";
-const char *ftxtsrc = "";
-
-
-// Vertex shader
-const char *vsrc =
+// Vertex shader for text
+const char *vtxtsrc =
 "#version 330 core\n"
 "layout (location = 0) in vec4 vertex;\n"
 "out vec2 tex_coords;\n"
@@ -23,8 +19,8 @@ const char *vsrc =
 "}";
 
 
-// Fragment shader
-const char *fsrc =
+// Fragment shader for text
+const char *ftxtsrc =
 "#version 330 core\n"
 "in vec2 tex_coords;\n"
 "out vec4 color;\n"
@@ -34,6 +30,27 @@ const char *fsrc =
 "  vec4 sampled = vec4(1.0, 1.0, 1.0, texture(text, tex_coords).r);\n"
 "  color = vec4(text_color, 1.0) * sampled;\n"
 "}";
+
+
+// Vertex shader for background
+const char *vbgsrc =
+"#version 330 core\n"
+"layout (location = 0) in vec2 vertex;\n"
+"uniform mat4 projection;\n" // <vec2 pos, vec2 tex>
+"void main() {\n"
+"  gl_Position = projection * vec4(vertex.xy, 0.0, 1.0);\n"
+"}";
+
+
+// Fragment shader for background
+const char *fbgsrc =
+"#version 330 core\n"
+"out vec4 color;\n"
+"uniform vec4 bg_color;\n"
+"void main() {\n"
+"  color = bg_color;\n"
+"}";
+
 
 
 
@@ -99,35 +116,48 @@ struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg,
 	if (!color_parse(&fgc, fg)) {
 		die_fmt("Unable to parse foreground color: %s", fg);
 	}
-	color_normalize(&fgc, &r->fgcol);
+	color_normalize(&fgc, &r->default_fgcol);
 	// Get background color
 	if (!color_parse(&bgc, bg)) {
 		die_fmt("Unable to parse foreground color: %s", bg);
 	}
-	color_normalize(&bgc, &r->bgcol);
+	r->fgcol = r->default_fgcol;
+	color_normalize(&bgc, &r->default_bgcol);
 	// Fill dimensions
 	r->dim.x = w->dim.x / f->advance.x;
 	r->dim.y = w->dim.y / f->advance.y;
 	// Allocate terminal box
-	if (!(r->termbox = calloc(r->dim.x * r->dim.y, sizeof(struct glyph*)))) {
+	if (!(r->termbox = calloc(r->dim.x * r->dim.y, sizeof(struct termchar)))) {
 		die_err("calloc()");
 	}
+	r->bgcol = r->default_bgcol;
 	// Initialize cursor
 	r->cursor.x = 0;
 	r->cursor.y = 0;
 	// Set pointers
 	r->window = w;
 	r->fonts = f;
-	// Compile and link shader
-	r->text_shader = _load_shaders(vsrc, fsrc);
-	// Create and initialize VAO and VBO
-	glGenVertexArrays(1, &r->VAO);
-	glGenBuffers(1, &r->VBO);
-	glBindVertexArray(r->VAO);
-	glBindBuffer(GL_ARRAY_BUFFER, r->VBO);
+	// Compile and link shaders
+	r->text_shader = _load_shaders(vtxtsrc, ftxtsrc);
+	r->bg_shader = _load_shaders(vbgsrc, fbgsrc);
+	// Create and initialize VAO and VBO for text
+	glGenVertexArrays(1, &r->VAO_text);
+	glGenBuffers(1, &r->VBO_text);
+	glBindVertexArray(r->VAO_text);
+	glBindBuffer(GL_ARRAY_BUFFER, r->VBO_text);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 6 * 4, NULL, GL_STREAM_DRAW);
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), 0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindVertexArray(0);
+	// Create and initialize VAO and VBO for background
+	glGenVertexArrays(1, &r->VAO_bg);
+	glGenBuffers(1, &r->VBO_bg);
+	glBindVertexArray(r->VAO_bg);
+	glBindBuffer(GL_ARRAY_BUFFER, r->VBO_bg);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 6 * 2, NULL, GL_STREAM_DRAW);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), 0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
 	// Clear window
@@ -149,9 +179,12 @@ void renderer_free(struct renderer *renderer) {
 		warn("NULL renderer");
 		return;
 	}
-	glDeleteBuffers(1, &renderer->VBO);
-	glDeleteVertexArrays(1, &renderer->VAO);
+	glDeleteBuffers(1, &renderer->VBO_bg);
+	glDeleteVertexArrays(1, &renderer->VAO_bg);
+	glDeleteBuffers(1, &renderer->VBO_text);
+	glDeleteVertexArrays(1, &renderer->VAO_text);
 	glDeleteProgram(renderer->text_shader);
+	glDeleteProgram(renderer->bg_shader);
 	free(renderer->termbox);
 	free(renderer);
 }
@@ -191,7 +224,7 @@ static void _render_glyph(struct renderer *r, unsigned i, unsigned j, const stru
 	vertices[5][0] = xpos + width;
 	vertices[5][1] = ypos + height;
 	// Update VBO
-	glBindBuffer(GL_ARRAY_BUFFER, r->VBO);
+	glBindBuffer(GL_ARRAY_BUFFER, r->VBO_text);
 	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	// Render quad
@@ -199,39 +232,99 @@ static void _render_glyph(struct renderer *r, unsigned i, unsigned j, const stru
 }
 
 
+// Draw background for each location
+static void _render_bg(struct renderer *r) {
+	GLuint loc_bg_color, loc_proj_mat;
+	vec4_t bgcol;
+	unsigned i, j;
+	GLfloat vertices[6][2] = { 0 };
+	GLfloat xpos = 0.0f, ypos = 0.0f;
+
+	glUseProgram(r->bg_shader);
+	loc_proj_mat = glGetUniformLocation(r->bg_shader, "projection");
+	loc_bg_color = glGetUniformLocation(r->bg_shader, "bg_color");
+	glUniform3f(loc_bg_color, r->fgcol.x, r->fgcol.y, r->fgcol.z);
+	glUniformMatrix4fv(loc_proj_mat, 1, GL_FALSE,  r->window->projmat);
+	glBindVertexArray(r->VAO_bg);
+
+	for (i = 0; i < r->dim.y; i++) {
+		for (j = 0; j < r->dim.x; j++) {
+			if (!r->termbox[i * r->dim.x + j].to_draw) {
+				continue;
+			}
+			bgcol = r->termbox[i * r->dim.x + j].bgcol;
+			glUniform4f(loc_bg_color, bgcol.x, bgcol.y, bgcol.z, bgcol.w);
+			// Set vertices
+			vertices[0][0] = xpos;
+			vertices[0][1] = ypos + r->fonts->advance.y;
+			vertices[1][0] = xpos;
+			vertices[1][1] = ypos;
+			vertices[2][0] = xpos + r->fonts->advance.x;
+			vertices[2][1] = ypos;
+			vertices[3][0] = xpos;
+			vertices[3][1] = ypos + r->fonts->advance.y;
+			vertices[4][0] = xpos + r->fonts->advance.x;
+			vertices[4][1] = ypos;
+			vertices[5][0] = xpos + r->fonts->advance.x;
+			vertices[5][1] = ypos + r->fonts->advance.y;
+			// Update VBO
+			glBindBuffer(GL_ARRAY_BUFFER, r->VBO_bg);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			// Render quad
+			glDrawArrays(GL_TRIANGLES, 0, 6);
+		}
+	}
+
+	glBindVertexArray(0);
+}
+
+
 // Render current contents
 static void _do_render(struct renderer *r, bool draw_cursor) {
 	const struct glyph *glyph;
 	GLuint loc_text_color, loc_proj_mat;
+	vec4_t fgcol, bgcol;
 	unsigned i, j;
 
 	// Clear window
 	glClearColor(r->bgcol.x, r->bgcol.y, r->bgcol.z, r->bgcol.w);
 	glClear(GL_COLOR_BUFFER_BIT);
 
+	// Render background
+	_render_bg(r);
+
+	// Render foreground
 	glUseProgram(r->text_shader);
-	loc_text_color = glGetUniformLocation(r->text_shader, "text_color");
 	loc_proj_mat = glGetUniformLocation(r->text_shader, "projection");
-	glUniform3f(loc_text_color, r->fgcol.x, r->fgcol.y, r->fgcol.z);
+	loc_text_color = glGetUniformLocation(r->text_shader, "text_color");
 	glUniformMatrix4fv(loc_proj_mat, 1, GL_FALSE,  r->window->projmat);
 	glActiveTexture(GL_TEXTURE0);
-	glBindVertexArray(r->VAO);
+	glBindVertexArray(r->VAO_text);
 
 	for (i = 0; i < r->dim.y; i++) {
 		for (j = 0; j < r->dim.x; j++) {
+			bgcol = r->termbox[i * r->dim.x + j].bgcol;
+			fgcol = r->termbox[i * r->dim.x + j].fgcol;
 			if (i == r->cursor.y && j == r->cursor.x && draw_cursor && r->cursor_glyph) {
-				_render_glyph(r, i, j, r->cursor_glyph);
-				glUniform3f(loc_text_color, r->bgcol.x, r->bgcol.y, r->bgcol.z);
-				if (!(glyph = r->termbox[i * r->dim.x + j])) {
-					glUniform3f(loc_text_color, r->fgcol.x, r->fgcol.y, r->fgcol.z);
-					continue;
-				}
-				_render_glyph(r, i, j, glyph);
 				glUniform3f(loc_text_color, r->fgcol.x, r->fgcol.y, r->fgcol.z);
-			} else {
-				if (!(glyph = r->termbox[i * r->dim.x + j])) {
+				_render_glyph(r, i, j, r->cursor_glyph);
+				if (!r->termbox[i * r->dim.x + j].to_draw) {
 					continue;
 				}
+				if (!(glyph = r->termbox[i * r->dim.x + j].glyph)) {
+					continue;
+				}
+				glUniform3f(loc_text_color, bgcol.x, bgcol.y, bgcol.z);
+				_render_glyph(r, i, j, glyph);
+			} else {
+				if (!r->termbox[i * r->dim.x + j].to_draw) {
+					continue;
+				}
+				if (!(glyph = r->termbox[i * r->dim.x + j].glyph)) {
+					continue;
+				}
+				glUniform3f(loc_text_color, fgcol.x, fgcol.y, fgcol.z);
 				_render_glyph(r, i, j, glyph);
 			}
 		}
@@ -300,7 +393,10 @@ void renderer_add_codepoint(struct renderer *r, uint32_t cp) {
 		if (!(glyph = fonts_get_glyph(r->fonts, cp))) {
 			warn_fmt("Could not get glyph for codepoint: %u", cp);
 		} else {
-			r->termbox[r->cursor.y * r->dim.x + r->cursor.x] = glyph;
+			r->termbox[r->cursor.y * r->dim.x + r->cursor.x].glyph = glyph;
+			r->termbox[r->cursor.y * r->dim.x + r->cursor.x].to_draw = true;
+			r->termbox[r->cursor.y * r->dim.x + r->cursor.x].fgcol = r->fgcol;
+			r->termbox[r->cursor.y * r->dim.x + r->cursor.x].bgcol = r->bgcol;
 		}
 		r->cursor.x++;
 	}
@@ -312,8 +408,8 @@ void renderer_add_codepoint(struct renderer *r, uint32_t cp) {
 	}
 	if (r->cursor.y >= r->dim.y) {
 		// Scroll 1 line up
-		memcpy(r->termbox, &r->termbox[r->dim.x], r->dim.x * (r->dim.y - 1) * sizeof(struct glyph*));
-		memset(&r->termbox[r->dim.x * (r->dim.y - 1)], 0, r->dim.x * sizeof(struct glyph*));
+		memcpy(r->termbox, &r->termbox[r->dim.x], r->dim.x * (r->dim.y - 1) * sizeof(struct termchar));
+		memset(&r->termbox[r->dim.x * (r->dim.y - 1)], 0, r->dim.x * sizeof(struct termchar));
 		r->cursor.y = r->dim.y - 1;
 	}
 }
@@ -385,7 +481,7 @@ void renderer_move_left(struct renderer *r, unsigned n) {
 
 // Resize renderer to match window (called by window subsystem)
 void renderer_resize(struct renderer *r) {
-	const struct glyph **tmp;
+	struct termchar *tmp;
 	if (!r) {
 		die("NULL renderer");
 	}
@@ -393,14 +489,14 @@ void renderer_resize(struct renderer *r) {
 	r->dim.x = r->window->dim.x / r->fonts->advance.x;
 	r->dim.y = r->window->dim.y / r->fonts->advance.y;
 	// Realloc terminal box
-	if (!(tmp = realloc(r->termbox, r->dim.x * r->dim.y * sizeof(struct glyph*)))) {
+	if (!(tmp = realloc(r->termbox, r->dim.x * r->dim.y * sizeof(struct termchar)))) {
 		die_err("realloc()");
 	}
 	r->termbox = tmp;
 	// Move cursor to 0
 	r->cursor.x = 0;
 	r->cursor.y = 0;
-	memset(r->termbox, 0, r->dim.x * r->dim.y * sizeof(struct glyph*));
+	memset(r->termbox, 0, r->dim.x * r->dim.y * sizeof(struct termchar));
 	// TODO: Copy data?
 	// Render
 	renderer_render(r);
@@ -438,13 +534,13 @@ void renderer_clear_screen(struct renderer *r, enum renderer_clear_type type) {
 	i = r->cursor.y * r->dim.x + r->cursor.x;
 	switch (type) {
 	case RENDERER_CLEAR_TO_END:
-		memset(&r->termbox[i], 0, (r->dim.x * r->dim.y - i) * sizeof(struct glyph*));
+		memset(&r->termbox[i], 0, (r->dim.x * r->dim.y - i) * sizeof(struct termchar));
 		break;
 	case RENDERER_CLEAR_FROM_BEG:
-		memset(r->termbox, 0, i * sizeof(struct glyph*));
+		memset(r->termbox, 0, i * sizeof(struct termchar));
 		break;
 	case RENDERER_CLEAR_ALL:
-		memset(r->termbox, 0, r->dim.x * r->dim.y * sizeof(struct glyph*));
+		memset(r->termbox, 0, r->dim.x * r->dim.y * sizeof(struct termchar));
 	}
 }
 
@@ -460,12 +556,54 @@ void renderer_clear_line(struct renderer *r, enum renderer_clear_type type) {
 	k = (r->cursor.y + 1) * r->dim.x;
 	switch (type) {
 	case RENDERER_CLEAR_TO_END:
-		memset(&r->termbox[j], 0, (k - j) * sizeof(struct glyph*));
+		memset(&r->termbox[j], 0, (k - j) * sizeof(struct termchar));
 		break;
 	case RENDERER_CLEAR_FROM_BEG:
-		memset(&r->termbox[i], 0, (j - i) * sizeof(struct glyph*));
+		memset(&r->termbox[i], 0, (j - i) * sizeof(struct termchar));
 		break;
 	case RENDERER_CLEAR_ALL:
-		memset(&r->termbox[i], 0, (k - i) * sizeof(struct glyph*));
+		memset(&r->termbox[i], 0, (k - i) * sizeof(struct termchar));
 	}
+}
+
+
+// Set renderer foreground color
+void renderer_set_fgcol(struct renderer *r, const struct color *color) {
+	if (!r) {
+		die("NULL renderer");
+	}
+	if (!color) {
+		die("NULL color");
+	}
+	color_normalize(color, &r->fgcol);
+}
+
+
+// Set renderer background color
+void renderer_set_bgcol(struct renderer *r, const struct color *color) {
+	if (!r) {
+		die("NULL renderer");
+	}
+	if (!color) {
+		die("NULL color");
+	}
+	color_normalize(color, &r->bgcol);
+}
+
+
+// Reset renderer foreground color
+void renderer_reset_fgcol(struct renderer *r) {
+	if (!r) {
+		die("NULL renderer");
+	}
+	r->fgcol = r->default_fgcol;
+}
+
+
+// Reset renderer background color
+void renderer_reset_bgcol(struct renderer *r) {
+	if (!r) {
+		die("NULL renderer");
+	}
+	r->bgcol = r->default_bgcol;
 }

@@ -103,7 +103,7 @@ struct fonts* fonts_new(const char *default_font, unsigned font_sz) {
 	// Disable byte alignment restriction
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 	// Load ASCII glyphs
-	for (c = 32; c < 128; c++) {
+	for (c = 32; c < 127; c++) {
 		if (!(glyph = load_glyph(face, c))) {
 			warn_fmt("Could not load glyph for codepoint: %u\n", c);
 			continue;
