@@ -127,13 +127,15 @@ struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg,
 	r->dim.x = w->dim.x / f->advance.x;
 	r->dim.y = w->dim.y / f->advance.y;
 	// Allocate terminal box
-	if (!(r->termbox = calloc(r->dim.x * r->dim.y, sizeof(struct termchar)))) {
+	if (!(r->termbox = calloc(r->dim.x * (r->dim.y + 1), sizeof(struct termchar)))) {
 		die_err("calloc()");
 	}
 	r->bgcol = r->default_bgcol;
 	// Initialize cursor
 	r->cursor.x = 0;
 	r->cursor.y = 0;
+	// Initialize top row
+	r->toprow = 0;
 	// Set pointers
 	r->window = w;
 	r->fonts = f;
@@ -236,7 +238,8 @@ static void _render_glyph(struct renderer *r, unsigned i, unsigned j, const stru
 static void _render_bg(struct renderer *r) {
 	GLuint loc_bg_color, loc_proj_mat;
 	vec4_t bgcol;
-	unsigned i, j;
+	uvec2_t advance;
+	unsigned i, j, toprow;
 	GLfloat vertices[6][2] = { 0 };
 	GLfloat xpos = 0.0f, ypos = 0.0f;
 
@@ -247,7 +250,10 @@ static void _render_bg(struct renderer *r) {
 	glUniformMatrix4fv(loc_proj_mat, 1, GL_FALSE,  r->window->projmat);
 	glBindVertexArray(r->VAO_bg);
 
-	for (i = 0; i < r->dim.y; i++) {
+	toprow = r->toprow;
+	advance = r->fonts->advance;
+
+	for (i = toprow; i != (toprow + r->dim.y) % (r->dim.y + 1); i = (i + 1) % (r->dim.y + 1)) {
 		for (j = 0; j < r->dim.x; j++) {
 			if (!r->termbox[i * r->dim.x + j].to_draw) {
 				continue;
@@ -256,23 +262,26 @@ static void _render_bg(struct renderer *r) {
 			glUniform4f(loc_bg_color, bgcol.x, bgcol.y, bgcol.z, bgcol.w);
 			// Set vertices
 			vertices[0][0] = xpos;
-			vertices[0][1] = ypos + r->fonts->advance.y;
+			vertices[0][1] = ypos + advance.y;
 			vertices[1][0] = xpos;
 			vertices[1][1] = ypos;
-			vertices[2][0] = xpos + r->fonts->advance.x;
+			vertices[2][0] = xpos + advance.x;
 			vertices[2][1] = ypos;
 			vertices[3][0] = xpos;
-			vertices[3][1] = ypos + r->fonts->advance.y;
-			vertices[4][0] = xpos + r->fonts->advance.x;
+			vertices[3][1] = ypos + advance.y;
+			vertices[4][0] = xpos + advance.x;
 			vertices[4][1] = ypos;
-			vertices[5][0] = xpos + r->fonts->advance.x;
-			vertices[5][1] = ypos + r->fonts->advance.y;
+			vertices[5][0] = xpos + advance.x;
+			vertices[5][1] = ypos + advance.y;
 			// Update VBO
 			glBindBuffer(GL_ARRAY_BUFFER, r->VBO_bg);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
 			glBindBuffer(GL_ARRAY_BUFFER, 0);
 			// Render quad
 			glDrawArrays(GL_TRIANGLES, 0, 6);
+			// Advance coords
+			xpos += advance.x;
+			ypos += advance.y;
 		}
 	}
 
@@ -285,7 +294,8 @@ static void _do_render(struct renderer *r, bool draw_cursor) {
 	const struct glyph *glyph;
 	GLuint loc_text_color, loc_proj_mat;
 	vec4_t fgcol, bgcol;
-	unsigned i, j;
+	uvec2_t cursor;
+	unsigned i, j, toprow, y;
 
 	// Clear window
 	glClearColor(r->bgcol.x, r->bgcol.y, r->bgcol.z, r->bgcol.w);
@@ -302,21 +312,28 @@ static void _do_render(struct renderer *r, bool draw_cursor) {
 	glActiveTexture(GL_TEXTURE0);
 	glBindVertexArray(r->VAO_text);
 
-	for (i = 0; i < r->dim.y; i++) {
+	toprow = r->toprow;
+	cursor = r->cursor;
+	cursor.y = (toprow + r->cursor.y) % (r->dim.y + 1);
+	y = 0;
+
+	for (i = toprow; i != (toprow + r->dim.y) % (r->dim.y + 1); i = (i + 1) % (r->dim.y + 1), y++) {
 		for (j = 0; j < r->dim.x; j++) {
 			bgcol = r->termbox[i * r->dim.x + j].bgcol;
 			fgcol = r->termbox[i * r->dim.x + j].fgcol;
-			if (i == r->cursor.y && j == r->cursor.x && draw_cursor && r->cursor_glyph) {
-				glUniform3f(loc_text_color, r->fgcol.x, r->fgcol.y, r->fgcol.z);
-				_render_glyph(r, i, j, r->cursor_glyph);
+			if (i == cursor.y && j == cursor.x && draw_cursor && r->cursor_glyph) {
+				glUniform3f(loc_text_color, r->default_fgcol.x, r->default_fgcol.y,
+						r->default_fgcol.z);
+				_render_glyph(r, y, j, r->cursor_glyph);
 				if (!r->termbox[i * r->dim.x + j].to_draw) {
 					continue;
 				}
 				if (!(glyph = r->termbox[i * r->dim.x + j].glyph)) {
 					continue;
 				}
-				glUniform3f(loc_text_color, bgcol.x, bgcol.y, bgcol.z);
-				_render_glyph(r, i, j, glyph);
+				glUniform3f(loc_text_color, r->default_bgcol.x, r->default_bgcol.y,
+						r->default_bgcol.z);
+				_render_glyph(r, y, j, glyph);
 			} else {
 				if (!r->termbox[i * r->dim.x + j].to_draw) {
 					continue;
@@ -325,7 +342,7 @@ static void _do_render(struct renderer *r, bool draw_cursor) {
 					continue;
 				}
 				glUniform3f(loc_text_color, fgcol.x, fgcol.y, fgcol.z);
-				_render_glyph(r, i, j, glyph);
+				_render_glyph(r, y, j, glyph);
 			}
 		}
 	}
@@ -363,7 +380,10 @@ void renderer_update(struct renderer *r) {
 
 // Add character
 void renderer_add_codepoint(struct renderer *r, uint32_t cp) {
-	const  struct glyph *glyph;
+	const struct glyph *glyph;
+	unsigned toprow, y;
+	uvec2_t cursor, dim;
+	vec4_t fgcol, bgcol;
 
 	if (!r) {
 		die("NULL renderer");
@@ -371,47 +391,57 @@ void renderer_add_codepoint(struct renderer *r, uint32_t cp) {
 	if (cp > 0x10ffff || (cp >= 0xd800 && cp < 0xe000)) {
 		die_fmt("Invalid Unicode codepoint: %u\n", cp);
 	}
+	toprow = r->toprow;
+	cursor = r->cursor;
+	dim = r->dim;
+	fgcol = r->fgcol;
+	bgcol = r->bgcol;
 
 	switch (cp) {
 	case '\b':
-		if (r->cursor.x > 0) {
-			r->cursor.x--;
+		if (cursor.x > 0) {
+			cursor.x--;
 		}
-		return;
+		break;
 	case '\t':
 		do {
-			r->cursor.x++;
-		} while (r->cursor.x % BTE_TABSZ != 0);
+			cursor.x++;
+		} while (cursor.x % BTE_TABSZ != 0);
 		break;
 	case '\r':
-		r->cursor.x = 0;
-		return;
+		cursor.x = 0;
+		break;
 	case '\n':
-		r->cursor.y++;
+		cursor.y++;
 		break;
 	default:
 		if (!(glyph = fonts_get_glyph(r->fonts, cp))) {
 			warn_fmt("Could not get glyph for codepoint: %u", cp);
 		} else {
-			r->termbox[r->cursor.y * r->dim.x + r->cursor.x].glyph = glyph;
-			r->termbox[r->cursor.y * r->dim.x + r->cursor.x].to_draw = true;
-			r->termbox[r->cursor.y * r->dim.x + r->cursor.x].fgcol = r->fgcol;
-			r->termbox[r->cursor.y * r->dim.x + r->cursor.x].bgcol = r->bgcol;
+			y = (toprow + cursor.y) % (dim.y + 1);
+			r->termbox[y * dim.x + cursor.x].glyph = glyph;
+			r->termbox[y * dim.x + cursor.x].to_draw = true;
+			r->termbox[y * dim.x + cursor.x].fgcol = fgcol;
+			r->termbox[y * dim.x + cursor.x].bgcol = bgcol;
 		}
-		r->cursor.x++;
+		cursor.x++;
 	}
 
 	// Is this default behaviour?
-	if (r->cursor.x >= r->dim.x) {
-		r->cursor.x = 0;
-		r->cursor.y++;
+	if (cursor.x >= dim.x) {
+		cursor.x = 0;
+		cursor.y++;
 	}
-	if (r->cursor.y >= r->dim.y) {
+	if (cursor.y >= dim.y) {
 		// Scroll 1 line up
-		memcpy(r->termbox, &r->termbox[r->dim.x], r->dim.x * (r->dim.y - 1) * sizeof(struct termchar));
-		memset(&r->termbox[r->dim.x * (r->dim.y - 1)], 0, r->dim.x * sizeof(struct termchar));
-		r->cursor.y = r->dim.y - 1;
+		toprow = (toprow + 1) % (dim.y + 1);
+		y = (toprow + dim.y - 1) % (dim.y + 1);
+		memset(&r->termbox[dim.x * y], 0, dim.x * sizeof(struct termchar));
+		cursor.y = dim.y - 1;
 	}
+	// Restore cursor and toprow
+	r->toprow = toprow;
+	r->cursor = cursor;
 }
 
 
@@ -489,14 +519,16 @@ void renderer_resize(struct renderer *r) {
 	r->dim.x = r->window->dim.x / r->fonts->advance.x;
 	r->dim.y = r->window->dim.y / r->fonts->advance.y;
 	// Realloc terminal box
-	if (!(tmp = realloc(r->termbox, r->dim.x * r->dim.y * sizeof(struct termchar)))) {
+	if (!(tmp = realloc(r->termbox, r->dim.x * (r->dim.y + 1) * sizeof(struct termchar)))) {
 		die_err("realloc()");
 	}
 	r->termbox = tmp;
 	// Move cursor to 0
 	r->cursor.x = 0;
 	r->cursor.y = 0;
-	memset(r->termbox, 0, r->dim.x * r->dim.y * sizeof(struct termchar));
+	// FIXME: Reset?
+	r->toprow = 0;
+	memset(r->termbox, 0, r->dim.x * (r->dim.y + 1) * sizeof(struct termchar));
 	// TODO: Copy data?
 	// Render
 	renderer_render(r);
@@ -527,33 +559,59 @@ void renderer_move_yx(struct renderer *r, unsigned y, unsigned x) {
 
 // Clear screen
 void renderer_clear_screen(struct renderer *r, enum renderer_clear_type type) {
-	unsigned i;
+	unsigned i, tr, cy, dy, ydiff;
+	uvec2_t dim;
 	if (!r) {
 		die("NULL renderer");
 	}
-	i = r->cursor.y * r->dim.x + r->cursor.x;
+	dim = r->dim;
+	tr = r->toprow;
+	cy = (tr + r->cursor.y) % (dim.y + 1);
+	dy = (tr + dim.y) % (dim.y + 1);
+	i = cy * dim.x + r->cursor.x;
+	// NOTE: dy CANNOT be equal to cy
+	// NOTE: dy CANNOT be equal to tr
 	switch (type) {
 	case RENDERER_CLEAR_TO_END:
-		memset(&r->termbox[i], 0, (r->dim.x * r->dim.y - i) * sizeof(struct termchar));
+		if (dy < cy) {
+			memset(&r->termbox[i], 0, ((dim.y + 1) * dim.x - i) * sizeof(struct termchar));
+			memset(&r->termbox[0], 0, dy * dim.x * sizeof(struct termchar));
+		} else {
+			memset(&r->termbox[i], 0, (dy * dim.x - i) * sizeof(struct termchar));
+		}
 		break;
 	case RENDERER_CLEAR_FROM_BEG:
-		memset(r->termbox, 0, i * sizeof(struct termchar));
+		if (tr <= cy) {
+			memset(&r->termbox[tr * dim.x], 0, i - (tr * dim.x) * sizeof(struct termchar));
+		} else {
+			memset(&r->termbox[tr * dim.x], 0, (dim.y + 1 - tr) * dim.x * sizeof(struct termchar));
+			memset(&r->termbox[0], 0, i * sizeof(struct termchar));
+		}
+		//memset(r->termbox, 0, i * sizeof(struct termchar));
 		break;
 	case RENDERER_CLEAR_ALL:
-		memset(r->termbox, 0, r->dim.x * r->dim.y * sizeof(struct termchar));
+		if (tr < dy) {
+			memset(&r->termbox[tr * dim.x], 0, dim.x * dim.y * sizeof(struct termchar));
+		} else {
+			ydiff = dim.y + 1 - tr;
+			memset(&r->termbox[tr * dim.x], 0, dim.x * ydiff * sizeof(struct termchar));
+			memset(&r->termbox[0], 0, dim.x * dy * sizeof(struct termchar));
+		}
+		break;
 	}
 }
 
 
 // Clear line
 void renderer_clear_line(struct renderer *r, enum renderer_clear_type type) {
-	unsigned i, j, k;
+	unsigned i, j, k, y;
 	if (!r) {
 		die("NULL renderer");
 	}
-	i = r->cursor.y * r->dim.x;
-	j = r->cursor.y * r->dim.x + r->cursor.x;
-	k = (r->cursor.y + 1) * r->dim.x;
+	y = (r->toprow + r->cursor.y) % (r->dim.y + 1);
+	i = y * r->dim.x;
+	j = y * r->dim.x + r->cursor.x;
+	k = (y + 1) * r->dim.x;
 	switch (type) {
 	case RENDERER_CLEAR_TO_END:
 		memset(&r->termbox[j], 0, (k - j) * sizeof(struct termchar));

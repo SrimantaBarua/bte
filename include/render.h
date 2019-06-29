@@ -31,6 +31,7 @@ struct renderer {
 	uvec2_t             cursor;        // Current cursor position
 	const struct glyph  *cursor_glyph; // Glyph to draw for cursor
 	bool                cursor_vis;    // Is cursor supposed to be visible?
+	unsigned            toprow;        // Topmost row (prevent memcpy)
 	// Pointers to other systems
 	struct window       *window;       // Pointer to window (not owned)
 	struct fonts        *fonts;        // Pointer to fonts subsystem (not owned)

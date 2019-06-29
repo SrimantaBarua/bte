@@ -120,6 +120,7 @@ static uint32_t _next_codepoint(struct child *child) {
 	// TODO: Check size of wchar_t
 	wchar_t wc;
 	size_t ret, i;
+	memset(&ps, 0, sizeof(ps));
 	while (1) {
 		ret = mbrtowc(&wc, (char*) &child->buf[child->bufidx], child->buflen - child->bufidx, &ps);
 		if (ret == (size_t) -2) {
