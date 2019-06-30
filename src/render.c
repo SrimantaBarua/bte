@@ -248,6 +248,7 @@ static void _render_bg(struct renderer *r) {
 	float projmat[16];
 	GLfloat vertices[6][2] = { 0 };
 	GLfloat xpos = 0.0f, ypos = 0.0f;
+	struct termchar tchar;
 
 	pthread_mutex_lock(&r->mut);
 	toprow = r->toprow;
@@ -256,6 +257,7 @@ static void _render_bg(struct renderer *r) {
 	for (i = 0; i < 16; i++) {
 		projmat[i] = r->window->projmat[i];
 	}
+	ypos = r->window->dim.y;
 	pthread_mutex_unlock(&r->mut);
 
 	glUseProgram(r->bg_shader);
@@ -266,24 +268,28 @@ static void _render_bg(struct renderer *r) {
 
 	for (i = toprow; i != (toprow + dim.y) % (dim.y + 1); i = (i + 1) % (dim.y + 1)) {
 		for (j = 0; j < dim.x; j++) {
-			if (!r->termbox[i * dim.x + j].to_draw) {
+			pthread_mutex_lock(&r->mut);
+			tchar = r->termbox[i * dim.x + j];
+			pthread_mutex_unlock(&r->mut);
+
+			if (!tchar.to_draw) {
 				continue;
 			}
-			bgcol = r->termbox[i * dim.x + j].bgcol;
+			bgcol = tchar.bgcol;
 			glUniform4f(loc_bg_color, bgcol.x, bgcol.y, bgcol.z, bgcol.w);
 			// Set vertices
 			vertices[0][0] = xpos;
-			vertices[0][1] = ypos + advance.y;
+			vertices[0][1] = ypos - advance.y;
 			vertices[1][0] = xpos;
 			vertices[1][1] = ypos;
 			vertices[2][0] = xpos + advance.x;
 			vertices[2][1] = ypos;
 			vertices[3][0] = xpos;
-			vertices[3][1] = ypos + advance.y;
+			vertices[3][1] = ypos - advance.y;
 			vertices[4][0] = xpos + advance.x;
 			vertices[4][1] = ypos;
 			vertices[5][0] = xpos + advance.x;
-			vertices[5][1] = ypos + advance.y;
+			vertices[5][1] = ypos - advance.y;
 			// Update VBO
 			glBindBuffer(GL_ARRAY_BUFFER, r->VBO_bg);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
@@ -292,8 +298,9 @@ static void _render_bg(struct renderer *r) {
 			glDrawArrays(GL_TRIANGLES, 0, 6);
 			// Advance coords
 			xpos += advance.x;
-			ypos += advance.y;
 		}
+		xpos = 0;
+		ypos -= advance.y;
 	}
 
 	glBindVertexArray(0);
@@ -339,7 +346,6 @@ static void _do_render(struct renderer *r, bool draw_cursor) {
 
 	for (i = toprow; i != (toprow + dim.y) % (dim.y + 1); i = (i + 1) % (dim.y + 1), y++) {
 		for (j = 0; j < dim.x; j++) {
-
 			pthread_mutex_lock(&r->mut);
 			tchar = r->termbox[i * dim.x + j];
 			pthread_mutex_unlock(&r->mut);
