@@ -171,6 +171,9 @@ struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg,
 		r->cursor_glyph = fonts_get_glyph(r->fonts, cursor);
 	}
 	r->cursor_vis = true;
+	// Initialize mutexes
+	pthread_mutex_init(&r->mut, NULL);
+	pthread_mutex_init(&r->size_mut, NULL);
 	return r;
 }
 
@@ -181,6 +184,8 @@ void renderer_free(struct renderer *renderer) {
 		warn("NULL renderer");
 		return;
 	}
+	pthread_mutex_destroy(&renderer->mut);
+	pthread_mutex_destroy(&renderer->size_mut);
 	glDeleteBuffers(1, &renderer->VBO_bg);
 	glDeleteVertexArrays(1, &renderer->VAO_bg);
 	glDeleteBuffers(1, &renderer->VBO_text);
@@ -238,27 +243,33 @@ static void _render_glyph(struct renderer *r, unsigned i, unsigned j, const stru
 static void _render_bg(struct renderer *r) {
 	GLuint loc_bg_color, loc_proj_mat;
 	vec4_t bgcol;
-	uvec2_t advance;
+	uvec2_t advance, dim;
 	unsigned i, j, toprow;
+	float projmat[16];
 	GLfloat vertices[6][2] = { 0 };
 	GLfloat xpos = 0.0f, ypos = 0.0f;
+
+	pthread_mutex_lock(&r->mut);
+	toprow = r->toprow;
+	advance = r->fonts->advance;
+	dim = r->dim;
+	for (i = 0; i < 16; i++) {
+		projmat[i] = r->window->projmat[i];
+	}
+	pthread_mutex_unlock(&r->mut);
 
 	glUseProgram(r->bg_shader);
 	loc_proj_mat = glGetUniformLocation(r->bg_shader, "projection");
 	loc_bg_color = glGetUniformLocation(r->bg_shader, "bg_color");
-	glUniform3f(loc_bg_color, r->fgcol.x, r->fgcol.y, r->fgcol.z);
-	glUniformMatrix4fv(loc_proj_mat, 1, GL_FALSE,  r->window->projmat);
+	glUniformMatrix4fv(loc_proj_mat, 1, GL_FALSE, projmat);
 	glBindVertexArray(r->VAO_bg);
 
-	toprow = r->toprow;
-	advance = r->fonts->advance;
-
-	for (i = toprow; i != (toprow + r->dim.y) % (r->dim.y + 1); i = (i + 1) % (r->dim.y + 1)) {
-		for (j = 0; j < r->dim.x; j++) {
-			if (!r->termbox[i * r->dim.x + j].to_draw) {
+	for (i = toprow; i != (toprow + dim.y) % (dim.y + 1); i = (i + 1) % (dim.y + 1)) {
+		for (j = 0; j < dim.x; j++) {
+			if (!r->termbox[i * dim.x + j].to_draw) {
 				continue;
 			}
-			bgcol = r->termbox[i * r->dim.x + j].bgcol;
+			bgcol = r->termbox[i * dim.x + j].bgcol;
 			glUniform4f(loc_bg_color, bgcol.x, bgcol.y, bgcol.z, bgcol.w);
 			// Set vertices
 			vertices[0][0] = xpos;
@@ -294,11 +305,23 @@ static void _do_render(struct renderer *r, bool draw_cursor) {
 	const struct glyph *glyph;
 	GLuint loc_text_color, loc_proj_mat;
 	vec4_t fgcol, bgcol;
-	uvec2_t cursor;
+	uvec2_t cursor, dim;
 	unsigned i, j, toprow, y;
+	float projmat[16];
+	struct termchar tchar;
+
+	pthread_mutex_lock(&r->mut);
+	toprow = r->toprow;
+	cursor = r->cursor;
+	cursor.y = (toprow + r->cursor.y) % (r->dim.y + 1);
+	for (i = 0; i < 16; i++) {
+		projmat[i] = r->window->projmat[i];
+	}
+	dim = r->dim;
+	pthread_mutex_unlock(&r->mut);
 
 	// Clear window
-	glClearColor(r->bgcol.x, r->bgcol.y, r->bgcol.z, r->bgcol.w);
+	glClearColor(r->default_bgcol.x, r->default_bgcol.y, r->default_bgcol.z, r->default_bgcol.w);
 	glClear(GL_COLOR_BUFFER_BIT);
 
 	// Render background
@@ -308,37 +331,40 @@ static void _do_render(struct renderer *r, bool draw_cursor) {
 	glUseProgram(r->text_shader);
 	loc_proj_mat = glGetUniformLocation(r->text_shader, "projection");
 	loc_text_color = glGetUniformLocation(r->text_shader, "text_color");
-	glUniformMatrix4fv(loc_proj_mat, 1, GL_FALSE,  r->window->projmat);
+	glUniformMatrix4fv(loc_proj_mat, 1, GL_FALSE, projmat);
 	glActiveTexture(GL_TEXTURE0);
 	glBindVertexArray(r->VAO_text);
 
-	toprow = r->toprow;
-	cursor = r->cursor;
-	cursor.y = (toprow + r->cursor.y) % (r->dim.y + 1);
 	y = 0;
 
-	for (i = toprow; i != (toprow + r->dim.y) % (r->dim.y + 1); i = (i + 1) % (r->dim.y + 1), y++) {
-		for (j = 0; j < r->dim.x; j++) {
-			bgcol = r->termbox[i * r->dim.x + j].bgcol;
-			fgcol = r->termbox[i * r->dim.x + j].fgcol;
+	for (i = toprow; i != (toprow + dim.y) % (dim.y + 1); i = (i + 1) % (dim.y + 1), y++) {
+		for (j = 0; j < dim.x; j++) {
+
+			pthread_mutex_lock(&r->mut);
+			tchar = r->termbox[i * dim.x + j];
+			pthread_mutex_unlock(&r->mut);
+
+			bgcol = tchar.bgcol;
+			fgcol = tchar.fgcol;
+
 			if (i == cursor.y && j == cursor.x && draw_cursor && r->cursor_glyph) {
 				glUniform3f(loc_text_color, r->default_fgcol.x, r->default_fgcol.y,
 						r->default_fgcol.z);
 				_render_glyph(r, y, j, r->cursor_glyph);
-				if (!r->termbox[i * r->dim.x + j].to_draw) {
+				if (!tchar.to_draw) {
 					continue;
 				}
-				if (!(glyph = r->termbox[i * r->dim.x + j].glyph)) {
+				if (!(glyph = tchar.glyph)) {
 					continue;
 				}
 				glUniform3f(loc_text_color, r->default_bgcol.x, r->default_bgcol.y,
 						r->default_bgcol.z);
 				_render_glyph(r, y, j, glyph);
 			} else {
-				if (!r->termbox[i * r->dim.x + j].to_draw) {
+				if (!tchar.to_draw) {
 					continue;
 				}
-				if (!(glyph = r->termbox[i * r->dim.x + j].glyph)) {
+				if (!(glyph = tchar.glyph)) {
 					continue;
 				}
 				glUniform3f(loc_text_color, fgcol.x, fgcol.y, fgcol.z);
@@ -371,10 +397,9 @@ void renderer_update(struct renderer *r) {
 	if (!r) {
 		die("NULL renderer");
 	}
-	if (r->req_render) {
+	if (__sync_bool_compare_and_swap(&r->req_render, true, false)) {
 		_do_render(r, r->cursor_vis);
 	}
-	r->req_render = false;
 }
 
 
@@ -391,6 +416,10 @@ void renderer_add_codepoint(struct renderer *r, uint32_t cp) {
 	if (cp > 0x10ffff || (cp >= 0xd800 && cp < 0xe000)) {
 		die_fmt("Invalid Unicode codepoint: %u\n", cp);
 	}
+
+	pthread_mutex_lock(&r->size_mut);
+	pthread_mutex_lock(&r->mut);
+
 	toprow = r->toprow;
 	cursor = r->cursor;
 	dim = r->dim;
@@ -442,6 +471,9 @@ void renderer_add_codepoint(struct renderer *r, uint32_t cp) {
 	// Restore cursor and toprow
 	r->toprow = toprow;
 	r->cursor = cursor;
+
+	pthread_mutex_unlock(&r->mut);
+	pthread_mutex_unlock(&r->size_mut);
 }
 
 
@@ -453,11 +485,13 @@ void renderer_move_up(struct renderer *r, unsigned n) {
 	if (n == 0) {
 		n = 1;
 	}
+	pthread_mutex_lock(&r->mut);
 	if (r->cursor.y < n) {
 		r->cursor.y = 0;
 	} else {
 		r->cursor.y -= n;
 	}
+	pthread_mutex_unlock(&r->mut);
 }
 
 
@@ -469,11 +503,15 @@ void renderer_move_down(struct renderer *r, unsigned n) {
 	if (n == 0) {
 		n = 1;
 	}
+	pthread_mutex_lock(&r->size_mut);
+	pthread_mutex_lock(&r->mut);
 	if (r->cursor.y + n >= r->dim.y) {
 		r->cursor.y = r->dim.y - 1;
 	} else {
 		r->cursor.y += n;
 	}
+	pthread_mutex_unlock(&r->mut);
+	pthread_mutex_unlock(&r->size_mut);
 }
 
 
@@ -485,11 +523,15 @@ void renderer_move_right(struct renderer *r, unsigned n) {
 	if (n == 0) {
 		n = 1;
 	}
+	pthread_mutex_lock(&r->size_mut);
+	pthread_mutex_lock(&r->mut);
 	if (r->cursor.x + n >= r->dim.x) {
 		r->cursor.x = r->dim.x - 1;
 	} else {
 		r->cursor.x += n;
 	}
+	pthread_mutex_unlock(&r->mut);
+	pthread_mutex_unlock(&r->size_mut);
 }
 
 
@@ -501,11 +543,13 @@ void renderer_move_left(struct renderer *r, unsigned n) {
 	if (n == 0) {
 		n = 1;
 	}
+	pthread_mutex_lock(&r->mut);
 	if (r->cursor.x < n) {
 		r->cursor.x = 0;
 	} else {
 		r->cursor.x -= n;
 	}
+	pthread_mutex_unlock(&r->mut);
 }
 
 
@@ -515,6 +559,8 @@ void renderer_resize(struct renderer *r) {
 	if (!r) {
 		die("NULL renderer");
 	}
+	pthread_mutex_lock(&r->size_mut);
+	pthread_mutex_lock(&r->mut);
 	// Fill dimensions
 	r->dim.x = r->window->dim.x / r->fonts->advance.x;
 	r->dim.y = r->window->dim.y / r->fonts->advance.y;
@@ -529,6 +575,8 @@ void renderer_resize(struct renderer *r) {
 	// FIXME: Reset?
 	r->toprow = 0;
 	memset(r->termbox, 0, r->dim.x * (r->dim.y + 1) * sizeof(struct termchar));
+	pthread_mutex_unlock(&r->mut);
+	pthread_mutex_unlock(&r->size_mut);
 	// TODO: Copy data?
 	// Render
 	renderer_render(r);
@@ -540,6 +588,8 @@ void renderer_move_yx(struct renderer *r, unsigned y, unsigned x) {
 	if (!r) {
 		die("NULL renderer");
 	}
+	pthread_mutex_lock(&r->size_mut);
+	pthread_mutex_lock(&r->mut);
 	if (y == 0) {
 		r->cursor.y = 0;
 	} else if (y > r->dim.y) {
@@ -554,6 +604,8 @@ void renderer_move_yx(struct renderer *r, unsigned y, unsigned x) {
 	} else {
 		r->cursor.x = x - 1;
 	}
+	pthread_mutex_unlock(&r->mut);
+	pthread_mutex_unlock(&r->size_mut);
 }
 
 
@@ -564,6 +616,8 @@ void renderer_clear_screen(struct renderer *r, enum renderer_clear_type type) {
 	if (!r) {
 		die("NULL renderer");
 	}
+	pthread_mutex_lock(&r->size_mut);
+	pthread_mutex_lock(&r->mut);
 	dim = r->dim;
 	tr = r->toprow;
 	cy = (tr + r->cursor.y) % (dim.y + 1);
@@ -599,6 +653,8 @@ void renderer_clear_screen(struct renderer *r, enum renderer_clear_type type) {
 		}
 		break;
 	}
+	pthread_mutex_unlock(&r->mut);
+	pthread_mutex_unlock(&r->size_mut);
 }
 
 
@@ -608,6 +664,8 @@ void renderer_clear_line(struct renderer *r, enum renderer_clear_type type) {
 	if (!r) {
 		die("NULL renderer");
 	}
+	pthread_mutex_lock(&r->size_mut);
+	pthread_mutex_lock(&r->mut);
 	y = (r->toprow + r->cursor.y) % (r->dim.y + 1);
 	i = y * r->dim.x;
 	j = y * r->dim.x + r->cursor.x;
@@ -622,6 +680,8 @@ void renderer_clear_line(struct renderer *r, enum renderer_clear_type type) {
 	case RENDERER_CLEAR_ALL:
 		memset(&r->termbox[i], 0, (k - i) * sizeof(struct termchar));
 	}
+	pthread_mutex_unlock(&r->mut);
+	pthread_mutex_unlock(&r->size_mut);
 }
 
 

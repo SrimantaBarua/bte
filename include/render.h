@@ -2,6 +2,7 @@
 #define __BTE_RENDER_H__
 
 
+#include <pthread.h>
 #include <inttypes.h>
 
 #include "util.h"
@@ -48,6 +49,8 @@ struct renderer {
 	vec4_t              default_fgcol; // Normalized default foreground color
 	vec4_t              default_bgcol; // Normalized default background color
 	bool                req_render;    // Has an updated render been requested?
+	pthread_mutex_t     mut;           // Mutex for general access to renderer
+	pthread_mutex_t     size_mut;      // Mutex for resizing
 };
 
 
