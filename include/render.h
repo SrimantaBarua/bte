@@ -51,11 +51,12 @@ struct renderer {
 	bool                req_render;    // Has an updated render been requested?
 	pthread_mutex_t     mut;           // Mutex for general access to renderer
 	pthread_mutex_t     size_mut;      // Mutex for resizing
+	const struct color  *palette;      // Standard palette of 16 colors
 };
 
 
 // Create a new renderer
-struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg, const char *bg, uint32_t cursor);
+struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg, const char *bg, uint32_t cursor, const struct color *palette);
 
 // Free renderer resources
 void renderer_free(struct renderer *renderer);
@@ -67,44 +68,11 @@ void renderer_render(struct renderer *renderer);
 // Do whatever the renderer needs to do
 void renderer_update(struct renderer *renderer);
 
-// Add character
-void renderer_add_codepoint(struct renderer *renderer, uint32_t codepoint);
-
-// Move cursor up by n
-void renderer_move_up(struct renderer *renderer, unsigned n);
-
-// Move cursor down by n
-void renderer_move_down(struct renderer *renderer, unsigned n);
-
-// Move cursor right by n
-void renderer_move_right(struct renderer *renderer, unsigned n);
-
-// Move cursor left by n
-void renderer_move_left(struct renderer *renderer, unsigned n);
-
-// Move cursor to (x, y)
-void renderer_move_yx(struct renderer *renderer, unsigned y, unsigned x);
-
-// Clear screen
-void renderer_clear_screen(struct renderer *renderer, enum renderer_clear_type type);
-
-// Clear line
-void renderer_clear_line(struct renderer *renderer, enum renderer_clear_type type);
+// Add codepoints to renderer. Return number of codepoints added
+size_t renderer_add_codepoints(struct renderer *renderer, uint32_t *cps, size_t n_cps);
 
 // Resize renderer to match window (called by window subsystem)
 void renderer_resize(struct renderer *renderer);
-
-// Set renderer foreground color
-void renderer_set_fgcol(struct renderer *renderer, const struct color *color);
-
-// Set renderer background color
-void renderer_set_bgcol(struct renderer *renderer, const struct color *color);
-
-// Reset renderer foreground color
-void renderer_reset_fgcol(struct renderer *renderer);
-
-// Reset renderer background color
-void renderer_reset_bgcol(struct renderer *renderer);
 
 
 #endif // __BTE_RENDER_H__

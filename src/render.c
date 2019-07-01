@@ -98,7 +98,7 @@ static GLuint _load_shaders(const char *vsrc, const char *fsrc) {
 
 
 // Create a new renderer
-struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg, const char *bg, uint32_t cursor) {
+struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg, const char *bg, uint32_t cursor, const struct color *palette) {
 	struct renderer *r;
 	struct color fgc, bgc;
 
@@ -139,6 +139,7 @@ struct renderer *renderer_new(struct window *w, struct fonts *f, const char *fg,
 	// Set pointers
 	r->window = w;
 	r->fonts = f;
+	r->palette = palette;
 	// Compile and link shaders
 	r->text_shader = _load_shaders(vtxtsrc, ftxtsrc);
 	r->bg_shader = _load_shaders(vbgsrc, fbgsrc);
@@ -409,193 +410,75 @@ void renderer_update(struct renderer *r) {
 }
 
 
-// Add character
-void renderer_add_codepoint(struct renderer *r, uint32_t cp) {
-	const struct glyph *glyph;
-	unsigned toprow, y;
-	uvec2_t cursor, dim;
-	vec4_t fgcol, bgcol;
-
-	if (!r) {
-		die("NULL renderer");
-	}
-	if (cp > 0x10ffff || (cp >= 0xd800 && cp < 0xe000)) {
-		die_fmt("Invalid Unicode codepoint: %u\n", cp);
-	}
-
-	pthread_mutex_lock(&r->size_mut);
-	pthread_mutex_lock(&r->mut);
-
-	toprow = r->toprow;
-	cursor = r->cursor;
-	dim = r->dim;
-	fgcol = r->fgcol;
-	bgcol = r->bgcol;
-
-	switch (cp) {
-	case '\b':
-		if (cursor.x > 0) {
-			cursor.x--;
-		}
-		break;
-	case '\t':
-		do {
-			cursor.x++;
-		} while (cursor.x % BTE_TABSZ != 0);
-		break;
-	case '\r':
-		cursor.x = 0;
-		break;
-	case '\n':
-		cursor.y++;
-		break;
-	default:
-		if (!(glyph = fonts_get_glyph(r->fonts, cp))) {
-			warn_fmt("Could not get glyph for codepoint: %u", cp);
-		} else {
-			y = (toprow + cursor.y) % (dim.y + 1);
-			r->termbox[y * dim.x + cursor.x].glyph = glyph;
-			r->termbox[y * dim.x + cursor.x].to_draw = true;
-			r->termbox[y * dim.x + cursor.x].fgcol = fgcol;
-			r->termbox[y * dim.x + cursor.x].bgcol = bgcol;
-		}
-		cursor.x++;
-	}
-
-	// Is this default behaviour?
-	if (cursor.x >= dim.x) {
-		cursor.x = 0;
-		cursor.y++;
-	}
-	if (cursor.y >= dim.y) {
-		// Scroll 1 line up
-		toprow = (toprow + 1) % (dim.y + 1);
-		y = (toprow + dim.y - 1) % (dim.y + 1);
-		memset(&r->termbox[dim.x * y], 0, dim.x * sizeof(struct termchar));
-		cursor.y = dim.y - 1;
-	}
-	// Restore cursor and toprow
-	r->toprow = toprow;
-	r->cursor = cursor;
-
-	pthread_mutex_unlock(&r->mut);
-	pthread_mutex_unlock(&r->size_mut);
-}
-
-
 // Move cursor up by n
-void renderer_move_up(struct renderer *r, unsigned n) {
+static void _move_up(struct renderer *r, unsigned n) {
 	if (!r) {
 		die("NULL renderer");
 	}
 	if (n == 0) {
 		n = 1;
 	}
-	pthread_mutex_lock(&r->mut);
 	if (r->cursor.y < n) {
 		r->cursor.y = 0;
 	} else {
 		r->cursor.y -= n;
 	}
-	pthread_mutex_unlock(&r->mut);
 }
 
 
 // Move cursor down by n
-void renderer_move_down(struct renderer *r, unsigned n) {
+static void _move_down(struct renderer *r, unsigned n) {
 	if (!r) {
 		die("NULL renderer");
 	}
 	if (n == 0) {
 		n = 1;
 	}
-	pthread_mutex_lock(&r->size_mut);
-	pthread_mutex_lock(&r->mut);
 	if (r->cursor.y + n >= r->dim.y) {
 		r->cursor.y = r->dim.y - 1;
 	} else {
 		r->cursor.y += n;
 	}
-	pthread_mutex_unlock(&r->mut);
-	pthread_mutex_unlock(&r->size_mut);
 }
 
 
 // Move cursor right by n
-void renderer_move_right(struct renderer *r, unsigned n) {
+static void _move_right(struct renderer *r, unsigned n) {
 	if (!r) {
 		die("NULL renderer");
 	}
 	if (n == 0) {
 		n = 1;
 	}
-	pthread_mutex_lock(&r->size_mut);
-	pthread_mutex_lock(&r->mut);
 	if (r->cursor.x + n >= r->dim.x) {
 		r->cursor.x = r->dim.x - 1;
 	} else {
 		r->cursor.x += n;
 	}
-	pthread_mutex_unlock(&r->mut);
-	pthread_mutex_unlock(&r->size_mut);
 }
 
 
 // Move cursor left by n
-void renderer_move_left(struct renderer *r, unsigned n) {
+static void _move_left(struct renderer *r, unsigned n) {
 	if (!r) {
 		die("NULL renderer");
 	}
 	if (n == 0) {
 		n = 1;
 	}
-	pthread_mutex_lock(&r->mut);
 	if (r->cursor.x < n) {
 		r->cursor.x = 0;
 	} else {
 		r->cursor.x -= n;
 	}
-	pthread_mutex_unlock(&r->mut);
-}
-
-
-// Resize renderer to match window (called by window subsystem)
-void renderer_resize(struct renderer *r) {
-	struct termchar *tmp;
-	if (!r) {
-		die("NULL renderer");
-	}
-	pthread_mutex_lock(&r->size_mut);
-	pthread_mutex_lock(&r->mut);
-	// Fill dimensions
-	r->dim.x = r->window->dim.x / r->fonts->advance.x;
-	r->dim.y = r->window->dim.y / r->fonts->advance.y;
-	// Realloc terminal box
-	if (!(tmp = realloc(r->termbox, r->dim.x * (r->dim.y + 1) * sizeof(struct termchar)))) {
-		die_err("realloc()");
-	}
-	r->termbox = tmp;
-	// Move cursor to 0
-	r->cursor.x = 0;
-	r->cursor.y = 0;
-	// FIXME: Reset?
-	r->toprow = 0;
-	memset(r->termbox, 0, r->dim.x * (r->dim.y + 1) * sizeof(struct termchar));
-	pthread_mutex_unlock(&r->mut);
-	pthread_mutex_unlock(&r->size_mut);
-	// TODO: Copy data?
-	// Render
-	renderer_render(r);
 }
 
 
 // Move cursor to (x, y)
-void renderer_move_yx(struct renderer *r, unsigned y, unsigned x) {
+static void _move_yx(struct renderer *r, unsigned y, unsigned x) {
 	if (!r) {
 		die("NULL renderer");
 	}
-	pthread_mutex_lock(&r->size_mut);
-	pthread_mutex_lock(&r->mut);
 	if (y == 0) {
 		r->cursor.y = 0;
 	} else if (y > r->dim.y) {
@@ -610,20 +493,16 @@ void renderer_move_yx(struct renderer *r, unsigned y, unsigned x) {
 	} else {
 		r->cursor.x = x - 1;
 	}
-	pthread_mutex_unlock(&r->mut);
-	pthread_mutex_unlock(&r->size_mut);
 }
 
 
 // Clear screen
-void renderer_clear_screen(struct renderer *r, enum renderer_clear_type type) {
+static void _clear_screen(struct renderer *r, enum renderer_clear_type type) {
 	unsigned i, tr, cy, dy, ydiff;
 	uvec2_t dim;
 	if (!r) {
 		die("NULL renderer");
 	}
-	pthread_mutex_lock(&r->size_mut);
-	pthread_mutex_lock(&r->mut);
 	dim = r->dim;
 	tr = r->toprow;
 	cy = (tr + r->cursor.y) % (dim.y + 1);
@@ -659,19 +538,15 @@ void renderer_clear_screen(struct renderer *r, enum renderer_clear_type type) {
 		}
 		break;
 	}
-	pthread_mutex_unlock(&r->mut);
-	pthread_mutex_unlock(&r->size_mut);
 }
 
 
 // Clear line
-void renderer_clear_line(struct renderer *r, enum renderer_clear_type type) {
+static void _clear_line(struct renderer *r, enum renderer_clear_type type) {
 	unsigned i, j, k, y;
 	if (!r) {
 		die("NULL renderer");
 	}
-	pthread_mutex_lock(&r->size_mut);
-	pthread_mutex_lock(&r->mut);
 	y = (r->toprow + r->cursor.y) % (r->dim.y + 1);
 	i = y * r->dim.x;
 	j = y * r->dim.x + r->cursor.x;
@@ -686,13 +561,11 @@ void renderer_clear_line(struct renderer *r, enum renderer_clear_type type) {
 	case RENDERER_CLEAR_ALL:
 		memset(&r->termbox[i], 0, (k - i) * sizeof(struct termchar));
 	}
-	pthread_mutex_unlock(&r->mut);
-	pthread_mutex_unlock(&r->size_mut);
 }
 
 
 // Set renderer foreground color
-void renderer_set_fgcol(struct renderer *r, const struct color *color) {
+static void _set_fgcol(struct renderer *r, const struct color *color) {
 	if (!r) {
 		die("NULL renderer");
 	}
@@ -704,7 +577,7 @@ void renderer_set_fgcol(struct renderer *r, const struct color *color) {
 
 
 // Set renderer background color
-void renderer_set_bgcol(struct renderer *r, const struct color *color) {
+static void _set_bgcol(struct renderer *r, const struct color *color) {
 	if (!r) {
 		die("NULL renderer");
 	}
@@ -716,7 +589,7 @@ void renderer_set_bgcol(struct renderer *r, const struct color *color) {
 
 
 // Reset renderer foreground color
-void renderer_reset_fgcol(struct renderer *r) {
+static void _reset_fgcol(struct renderer *r) {
 	if (!r) {
 		die("NULL renderer");
 	}
@@ -725,9 +598,368 @@ void renderer_reset_fgcol(struct renderer *r) {
 
 
 // Reset renderer background color
-void renderer_reset_bgcol(struct renderer *r) {
+static void _reset_bgcol(struct renderer *r) {
 	if (!r) {
 		die("NULL renderer");
 	}
 	r->bgcol = r->default_bgcol;
+}
+
+
+// An escape sequence
+struct esc_seq {
+	unsigned nparam;     // Number of parameters
+	unsigned params[32]; // Parameters
+	char     final;      // Final character
+	char     private;    // Character denoting private escape sequence
+};
+
+
+static void _process_esc(struct renderer *r, struct esc_seq *esc) {
+	unsigned i;
+	printf("Escape: \\x1b[");
+	if (esc->private) {
+		printf("%c", esc->private);
+	}
+	for (i = 0; i + 1 < esc->nparam; i++) {
+		printf("%u;", esc->params[i]);
+	}
+	if (i < esc->nparam) {
+		printf("%u", esc->params[i]);
+	}
+	printf("%c\n", esc->final);
+	if (esc->private == 0) {
+		switch (esc->final) {
+		// Cursor position
+		case 'A':
+			if (esc->nparam == 0) {
+				esc->params[0] = 1;
+			}
+			_move_up(r, esc->params[0]);
+			return;
+		case 'B':
+			if (esc->nparam == 0) {
+				esc->params[0] = 1;
+			}
+			_move_down(r, esc->params[0]);
+			return;
+		case 'C':
+			if (esc->nparam == 0) {
+				esc->params[0] = 1;
+			}
+			_move_right(r, esc->params[0]);
+			return;
+		case 'D':
+			if (esc->nparam == 0) {
+				esc->params[0] = 1;
+			}
+			_move_left(r, esc->params[0]);
+			return;
+		case 'H':
+			if (esc->nparam == 1) {
+				esc->params[1] = 1;
+			}
+			if (esc->nparam == 0) {
+				esc->params[0] = 1;
+			}
+			_move_yx(r, esc->params[0], esc->params[1]);
+			return;
+		// Clear line/screen
+		case 'J':
+			if (esc->nparam == 0) {
+				esc->params[0] = 0;
+			}
+			_clear_screen(r, esc->params[0]);
+			return;
+		case 'K':
+			if (esc->nparam == 0) {
+				esc->params[0] = 0;
+			}
+			_clear_line(r, esc->params[0]);
+			return;
+		// Attributes
+		case 'm':
+			// TODO: Handle attribs other than color (bold, underline etc)
+			i = 0;
+			while (i < esc->nparam) {
+				switch (esc->params[i]) {
+				case 0:
+					_reset_fgcol(r);
+					_reset_bgcol(r);
+					break;
+				case 30:
+					_set_fgcol(r, &r->palette[0]);
+					break;
+				case 31:
+					_set_fgcol(r, &r->palette[1]);
+					break;
+				case 32:
+					_set_fgcol(r, &r->palette[2]);
+					break;
+				case 33:
+					_set_fgcol(r, &r->palette[3]);
+					break;
+				case 34:
+					_set_fgcol(r, &r->palette[4]);
+					break;
+				case 35:
+					_set_fgcol(r, &r->palette[5]);
+					break;
+				case 36:
+					_set_fgcol(r, &r->palette[6]);
+					break;
+				case 37:
+					_set_fgcol(r, &r->palette[7]);
+					break;
+				case 39:
+					_reset_fgcol(r);
+					break;
+				case 40:
+					_set_bgcol(r, &r->palette[0]);
+					break;
+				case 41:
+					_set_bgcol(r, &r->palette[1]);
+					break;
+				case 42:
+					_set_bgcol(r, &r->palette[2]);
+					break;
+				case 43:
+					_set_bgcol(r, &r->palette[3]);
+					break;
+				case 44:
+					_set_bgcol(r, &r->palette[4]);
+					break;
+				case 45:
+					_set_bgcol(r, &r->palette[5]);
+					break;
+				case 46:
+					_set_bgcol(r, &r->palette[6]);
+					break;
+				case 47:
+					_set_bgcol(r, &r->palette[7]);
+					break;
+				case 49:
+					_reset_bgcol(r);
+					break;
+				case 90:
+					_set_fgcol(r, &r->palette[8]);
+					break;
+				case 91:
+					_set_fgcol(r, &r->palette[9]);
+					break;
+				case 92:
+					_set_fgcol(r, &r->palette[10]);
+					break;
+				case 93:
+					_set_fgcol(r, &r->palette[11]);
+					break;
+				case 94:
+					_set_fgcol(r, &r->palette[12]);
+					break;
+				case 95:
+					_set_fgcol(r, &r->palette[13]);
+					break;
+				case 96:
+					_set_fgcol(r, &r->palette[14]);
+					break;
+				case 97:
+					_set_fgcol(r, &r->palette[15]);
+					break;
+				case 100:
+					_set_bgcol(r, &r->palette[8]);
+					break;
+				case 101:
+					_set_bgcol(r, &r->palette[9]);
+					break;
+				case 102:
+					_set_bgcol(r, &r->palette[10]);
+					break;
+				case 103:
+					_set_bgcol(r, &r->palette[11]);
+					break;
+				case 104:
+					_set_bgcol(r, &r->palette[12]);
+					break;
+				case 105:
+					_set_bgcol(r, &r->palette[13]);
+					break;
+				case 106:
+					_set_bgcol(r, &r->palette[14]);
+					break;
+				case 107:
+					_set_bgcol(r, &r->palette[15]);
+					break;
+				}
+				i++;
+			}
+			return;
+		}
+	}
+}
+
+
+// Add codepoints to renderer. Return number of codepoints added
+size_t renderer_add_codepoints(struct renderer *r, uint32_t *cps, size_t n_cps) {
+	const struct glyph *glyph;
+	struct esc_seq esc = { 0 };
+	unsigned y, param;
+	bool in_num = false;
+	size_t i, j, lines;
+
+	if (!r) {
+		die("NULL renderer");
+	}
+
+	lines = 0;
+
+	pthread_mutex_lock(&r->size_mut);
+
+	i = 0;
+	while (i < n_cps) {
+		if (cps[i] > 0x10ffff || (cps[i] >= 0xd800 && cps[i] < 0xe000)) {
+			die_fmt("Invalid Unicode codepoint: %u\n", cps[i]);
+		}
+		if (cps[i] == 27) {
+			// Escape
+			if ((j = i + 1) >= n_cps) {
+				break;
+			}
+			if (cps[j] != '[') {
+				i++;
+				continue;
+			}
+			param = 0;
+			in_num = false;
+			memset(&esc, 0, sizeof(struct esc_seq));
+			if (++j >= n_cps) {
+				goto out;
+			}
+			if (cps[j] == '?') {
+				esc.private = '?';
+				j++;
+			}
+			while (1) {
+				if (j >= n_cps) {
+					goto out;
+				}
+				if (cps[j] == ';') {
+					if (esc.nparam < sizeof(esc.params) / sizeof(esc.params[0])) {
+						esc.params[esc.nparam++] = param;
+					}
+					param = 0;
+					in_num = false;
+					j++;
+					continue;
+				}
+				if (cps[j] >= '0' && cps[j] <= '9') {
+					in_num = true;
+					param = param * 10 + (cps[j] - '0');
+					j++;
+					continue;
+				}
+				if (esc.nparam < sizeof(esc.params) / sizeof(esc.params[0])) {
+					esc.params[esc.nparam++] = param;
+				}
+				esc.final = cps[j];
+				i = j + 1;
+				break;
+			}
+			_process_esc(r, &esc);
+			continue;
+		}
+		pthread_mutex_lock(&r->mut);
+		switch (cps[i]) {
+		case '\a':
+			// Ignore
+			break;
+		case '\b':
+			if (r->cursor.x > 0) {
+				r->cursor.x--;
+			}
+			break;
+		case '\t':
+			do {
+				r->cursor.x++;
+			} while (r->cursor.x % BTE_TABSZ != 0);
+			break;
+		case '\r':
+			r->cursor.x = 0;
+			break;
+		case '\n':
+			y = (r->toprow + r->cursor.y) % (r->dim.y + 1);
+			r->cursor.y++;
+			lines++;
+			break;
+		default:
+			if (!(glyph = fonts_get_glyph(r->fonts, cps[i]))) {
+				warn_fmt("Could not get glyph for codepoint: %u", cps[i]);
+			} else {
+				y = (r->toprow + r->cursor.y) % (r->dim.y + 1);
+				r->termbox[y * r->dim.x + r->cursor.x].glyph = glyph;
+				r->termbox[y * r->dim.x + r->cursor.x].to_draw = true;
+				r->termbox[y * r->dim.x + r->cursor.x].fgcol = r->fgcol;
+				r->termbox[y * r->dim.x + r->cursor.x].bgcol = r->bgcol;
+			}
+			r->cursor.x++;
+		}
+
+		// Is this default behaviour?
+		if (r->cursor.x >= r->dim.x) {
+			r->cursor.x = 0;
+			r->cursor.y++;
+			lines++;
+		}
+		if (r->cursor.y >= r->dim.y) {
+			// Scroll 1 line up
+			r->toprow = (r->toprow + 1) % (r->dim.y + 1);
+			y = (r->toprow + r->dim.y - 1) % (r->dim.y + 1);
+			r->cursor.y = r->dim.y - 1;
+			memset(&r->termbox[r->dim.x * y], 0, r->dim.x * sizeof(struct termchar));
+		}
+		pthread_mutex_unlock(&r->mut);
+		i++;
+	}
+
+out:
+	if (lines > 0) {
+		// Clear out last line
+		y = (r->toprow + r->cursor.y) % (r->dim.y + 1);
+		pthread_mutex_lock(&r->mut);
+		memset(&r->termbox[r->dim.x * y + r->cursor.x], 0, (r->dim.x - r->cursor.x) * sizeof(struct termchar));
+		pthread_mutex_unlock(&r->mut);
+	}
+
+	pthread_mutex_unlock(&r->size_mut);
+
+	return i;
+}
+
+
+// Resize renderer to match window (called by window subsystem)
+void renderer_resize(struct renderer *r) {
+	struct termchar *tmp;
+	if (!r) {
+		die("NULL renderer");
+	}
+	pthread_mutex_lock(&r->size_mut);
+	pthread_mutex_lock(&r->mut);
+	// Fill dimensions
+	r->dim.x = r->window->dim.x / r->fonts->advance.x;
+	r->dim.y = r->window->dim.y / r->fonts->advance.y;
+	// Realloc terminal box
+	if (!(tmp = realloc(r->termbox, r->dim.x * (r->dim.y + 1) * sizeof(struct termchar)))) {
+		die_err("realloc()");
+	}
+	r->termbox = tmp;
+	// Move cursor to 0
+	r->cursor.x = 0;
+	r->cursor.y = 0;
+	// FIXME: Reset?
+	r->toprow = 0;
+	memset(r->termbox, 0, r->dim.x * (r->dim.y + 1) * sizeof(struct termchar));
+	pthread_mutex_unlock(&r->mut);
+	pthread_mutex_unlock(&r->size_mut);
+	// TODO: Copy data?
+	// Render
+	renderer_render(r);
 }

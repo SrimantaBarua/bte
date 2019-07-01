@@ -98,243 +98,7 @@ static void _spawn_child(struct child *child, const char **argv, const char **en
 }
 
 
-static int _fill_buf(struct child *child) {
-	ssize_t ret;
-	if (child->bufidx >= child->buflen) {
-		child->bufidx = child->buflen = 0;
-	} else {
-		memcpy(child->buf, &child->buf[child->bufidx], child->buflen - child->bufidx);
-		child->buflen -= child->bufidx;
-		child->bufidx = 0;
-	}
-	if ((ret = read(child->fd, &child->buf[child->buflen], BUFSIZ - child->buflen)) <= 0) {
-		return -1;
-	}
-	child->buflen += ret;
-	return 0;
-}
-
-
-static uint32_t _next_codepoint(struct child *child) {
-	mbstate_t ps;
-	// TODO: Check size of wchar_t
-	wchar_t wc;
-	size_t ret, i;
-	memset(&ps, 0, sizeof(ps));
-	while (1) {
-		ret = mbrtowc(&wc, (char*) &child->buf[child->bufidx], child->buflen - child->bufidx, &ps);
-		if (ret == (size_t) -2) {
-			// Incomplete multibyte character
-			// Render what we have first
-			if (child->renderer) {
-				renderer_render(child->renderer);
-			}
-			// Fill buffer
-			if (_fill_buf(child) < 0) {
-				return UINT32_MAX;
-			}
-			continue;
-		}
-		if (ret == (size_t) -1) {
-			// Invalid multibyte sequence
-			memset(&ps, 0, sizeof(ps));
-			warn_fmt("Could not process byte in multibyte string: %u\n", child->buf[child->bufidx]);
-			child->bufidx++;
-			continue;
-		}
-		if (ret == 0) {
-			die("Unexpected ret == 0");
-		}
-		child->bufidx += ret;
-		return (uint32_t) wc;
-	}
-}
-
-
-static void _process_esc(struct child *child, struct esc_seq *esc) {
-	unsigned i;
-	if (!child->renderer) {
-		return;
-	}
-	printf("Escape: \\x1b[");
-	if (esc->private) {
-		printf("%c", esc->private);
-	}
-	for (i = 0; i + 1 < esc->nparam; i++) {
-		printf("%u;", esc->params[i]);
-	}
-	if (i < esc->nparam) {
-		printf("%u", esc->params[i]);
-	}
-	printf("%c\n", esc->final);
-	if (esc->private == 0) {
-		switch (esc->final) {
-		// Cursor position
-		case 'A':
-			if (esc->nparam == 0) {
-				esc->params[0] = 1;
-			}
-			renderer_move_up(child->renderer, esc->params[0]);
-			return;
-		case 'B':
-			if (esc->nparam == 0) {
-				esc->params[0] = 1;
-			}
-			renderer_move_down(child->renderer, esc->params[0]);
-			return;
-		case 'C':
-			if (esc->nparam == 0) {
-				esc->params[0] = 1;
-			}
-			renderer_move_right(child->renderer, esc->params[0]);
-			return;
-		case 'D':
-			if (esc->nparam == 0) {
-				esc->params[0] = 1;
-			}
-			renderer_move_left(child->renderer, esc->params[0]);
-			return;
-		case 'H':
-			if (esc->nparam == 1) {
-				esc->params[1] = 1;
-			}
-			if (esc->nparam == 0) {
-				esc->params[0] = 1;
-			}
-			renderer_move_yx(child->renderer, esc->params[0], esc->params[1]);
-			return;
-		// Clear line/screen
-		case 'J':
-			if (esc->nparam == 0) {
-				esc->params[0] = 0;
-			}
-			renderer_clear_screen(child->renderer, esc->params[0]);
-			return;
-		case 'K':
-			if (esc->nparam == 0) {
-				esc->params[0] = 0;
-			}
-			renderer_clear_line(child->renderer, esc->params[0]);
-			return;
-		// Attributes
-		case 'm':
-			// TODO: Handle attribs other than color (bold, underline etc)
-			i = 0;
-			while (i < esc->nparam) {
-				switch (esc->params[i]) {
-				case 0:
-					renderer_reset_fgcol(child->renderer);
-					renderer_reset_bgcol(child->renderer);
-					break;
-				case 30:
-					renderer_set_fgcol(child->renderer, &child->palette[0]);
-					break;
-				case 31:
-					renderer_set_fgcol(child->renderer, &child->palette[1]);
-					break;
-				case 32:
-					renderer_set_fgcol(child->renderer, &child->palette[2]);
-					break;
-				case 33:
-					renderer_set_fgcol(child->renderer, &child->palette[3]);
-					break;
-				case 34:
-					renderer_set_fgcol(child->renderer, &child->palette[4]);
-					break;
-				case 35:
-					renderer_set_fgcol(child->renderer, &child->palette[5]);
-					break;
-				case 36:
-					renderer_set_fgcol(child->renderer, &child->palette[6]);
-					break;
-				case 37:
-					renderer_set_fgcol(child->renderer, &child->palette[7]);
-					break;
-				case 39:
-					renderer_reset_fgcol(child->renderer);
-					break;
-				case 40:
-					renderer_set_bgcol(child->renderer, &child->palette[0]);
-					break;
-				case 41:
-					renderer_set_bgcol(child->renderer, &child->palette[1]);
-					break;
-				case 42:
-					renderer_set_bgcol(child->renderer, &child->palette[2]);
-					break;
-				case 43:
-					renderer_set_bgcol(child->renderer, &child->palette[3]);
-					break;
-				case 44:
-					renderer_set_bgcol(child->renderer, &child->palette[4]);
-					break;
-				case 45:
-					renderer_set_bgcol(child->renderer, &child->palette[5]);
-					break;
-				case 46:
-					renderer_set_bgcol(child->renderer, &child->palette[6]);
-					break;
-				case 47:
-					renderer_set_bgcol(child->renderer, &child->palette[7]);
-					break;
-				case 49:
-					renderer_reset_bgcol(child->renderer);
-					break;
-				case 90:
-					renderer_set_fgcol(child->renderer, &child->palette[8]);
-					break;
-				case 91:
-					renderer_set_fgcol(child->renderer, &child->palette[9]);
-					break;
-				case 92:
-					renderer_set_fgcol(child->renderer, &child->palette[10]);
-					break;
-				case 93:
-					renderer_set_fgcol(child->renderer, &child->palette[11]);
-					break;
-				case 94:
-					renderer_set_fgcol(child->renderer, &child->palette[12]);
-					break;
-				case 95:
-					renderer_set_fgcol(child->renderer, &child->palette[13]);
-					break;
-				case 96:
-					renderer_set_fgcol(child->renderer, &child->palette[14]);
-					break;
-				case 97:
-					renderer_set_fgcol(child->renderer, &child->palette[15]);
-					break;
-				case 100:
-					renderer_set_bgcol(child->renderer, &child->palette[8]);
-					break;
-				case 101:
-					renderer_set_bgcol(child->renderer, &child->palette[9]);
-					break;
-				case 102:
-					renderer_set_bgcol(child->renderer, &child->palette[10]);
-					break;
-				case 103:
-					renderer_set_bgcol(child->renderer, &child->palette[11]);
-					break;
-				case 104:
-					renderer_set_bgcol(child->renderer, &child->palette[12]);
-					break;
-				case 105:
-					renderer_set_bgcol(child->renderer, &child->palette[13]);
-					break;
-				case 106:
-					renderer_set_bgcol(child->renderer, &child->palette[14]);
-					break;
-				case 107:
-					renderer_set_bgcol(child->renderer, &child->palette[15]);
-					break;
-				}
-				i++;
-			}
-			return;
-		}
-	}
-}
+#define WBUFSIZ (BUFSIZ >> 2)
 
 
 static void* _reader_thread(void *arg) {
@@ -343,79 +107,77 @@ static void* _reader_thread(void *arg) {
 	struct esc_seq esc = { 0 };
 	bool in_num = false;
 	unsigned param = 0;
+	char *buf;
+	wchar_t *wbuf;
+	size_t buflen = 0, wbuflen = 0, cvtret, i;
+	ssize_t ret;
+	mbstate_t ps;
+
+	// Allocate buffers
+	if (!(buf = malloc(BUFSIZ))) {
+		die_err("malloc()");
+	}
+	// TODO: Ensure size of wchar_t == 4
+	if (!(wbuf = malloc(WBUFSIZ * sizeof(wchar_t)))) {
+		die_err("malloc()");
+	}
 
 	while (1) {
-		if ((cp = _next_codepoint(child)) == UINT32_MAX) {
+		// Read into buffer
+		if ((ret = read(child->fd, &buf[buflen], BUFSIZ - buflen)) < 0) {
+			// Child has closed
 			break;
 		}
-		print_codepoint(cp);
+		buflen += ret;
 
-		if (!child->renderer) {
-			continue;
-		}
-
-		// Beginning of escape sequence?
-		if (cp == 27) {
-			if ((cp = _next_codepoint(child)) == UINT32_MAX) {
+		// Convert to wchar_t string
+		i = 0;
+		memset(&ps, 0, sizeof(ps));
+		while (wbuflen < WBUFSIZ) {
+			cvtret = mbrtowc(&wbuf[wbuflen], &buf[i], buflen - i, &ps);
+			if (cvtret == (size_t) -2) {
+				// Incomplete. Break, send what we have to renderer
 				break;
 			}
-			if (cp != '[') {
+			if (cvtret == (size_t) -1) {
+				// Invalid byte
+				warn_fmt("Invalid byte %u in multibyte sequence", buf[i]);
+				i++;
+				memset(&ps, 0, sizeof(ps));
 				continue;
 			}
-
-			print_codepoint(cp);
-
-			param = 0;
-			in_num = false;
-			memset(&esc, 0, sizeof(struct esc_seq));
-			while (1) {
-				if ((cp = _next_codepoint(child)) == UINT32_MAX) {
-					goto out;
-				}
-
-				print_codepoint(cp);
-
-				if (cp == '?') {
-					if (in_num) {
-						if (esc.nparam < sizeof(esc.params) / sizeof(esc.params[0])) {
-							esc.params[esc.nparam++] = param;
-						}
-					}
-					esc.private = '?';
-					continue;
-				}
-				if (cp == ';') {
-					if (esc.nparam < sizeof(esc.params) / sizeof(esc.params[0])) {
-						esc.params[esc.nparam++] = param;
-					}
-					param = 0;
-					in_num = false;
-					continue;
-				}
-				if (cp >= '0' && cp <= '9') {
-					in_num = true;
-					param = param * 10 + (cp - '0');
-					continue;
-				}
-				if (esc.nparam < sizeof(esc.params) / sizeof(esc.params[0])) {
-					esc.params[esc.nparam++] = param;
-				}
-				esc.final = cp;
-				break;
-			}
-			_process_esc(child, &esc);
-			renderer_render(child->renderer);
-			continue;
+			i += cvtret;
+			wbuflen++;
 		}
 
-		if (cp == '\a') {
-			continue;
+		// Move read buffer
+		if (i > 0 && i < buflen) {
+			memcpy(buf, buf + i, buflen - i);
+			buflen -= i;
+		} else if (i > 0) {
+			buflen = 0;
 		}
-		renderer_add_codepoint(child->renderer, cp);
+
+		// Send to renderer
+		// TODO: Check size of wchar_t
+		i = renderer_add_codepoints(child->renderer, (uint32_t*) wbuf, wbuflen);
+
+		// Denote that renderer should render
 		renderer_render(child->renderer);
+
+		// Move wchar_t buffer indices
+		// TODO: Check size of wchar_t
+		if (i > 0 && i < wbuflen) {
+			memcpy(wbuf, &wbuf[i], (wbuflen - i) * sizeof(wchar_t));
+			wbuflen = i;
+		} else if (i > 0) {
+			wbuflen = 0;
+		}
 	}
 
 out:
+	free(buf);
+	free(wbuf);
 	if (child->window) {
 		window_set_should_close(child->window);
 	}
@@ -425,7 +187,7 @@ out:
 
 
 // Initialize new child
-struct child* child_new(const char **argv, const char **envp, struct renderer *r, struct window *w, const struct color *palette) {
+struct child* child_new(const char **argv, const char **envp, struct renderer *r, struct window *w) {
 	struct child *child;
 	if (!argv || !*argv) {
 		die("NULL argv");
@@ -443,13 +205,8 @@ struct child* child_new(const char **argv, const char **envp, struct renderer *r
 	// Set pointers
 	child->renderer = r;
 	child->window = w;
-	child->palette = palette;
 	// Get FD and spawn chid
 	_spawn_child(child, argv, envp);
-	// Allocate read buffer
-	if (!(child->buf = malloc(BUFSIZ))) {
-		die_err("malloc()");
-	}
 	// Start reader thread
 	if (pthread_create(&child->tid, NULL, _reader_thread, (void*) child)) {
 		die_err("pthread_create()");
@@ -467,7 +224,6 @@ void child_fini(struct child *child) {
 	kill(child->pid, SIGKILL);
 	waitpid(child->pid, NULL, 0);
 	pthread_join(child->tid, NULL);
-	free(child->buf);
 	close(child->fd);
 	free(child);
 }

@@ -55,12 +55,6 @@ static struct child* _spawn_child(const char **envp, struct window *w, struct re
 	char buf[128];
 	struct child *child;
 
-	for (i = 0; i < 16; i++) {
-		if (!color_parse(&parsed_palette[i], BTE_COLOR_PALETTE[i])) {
-			die_fmt("Could not parse color: %s", BTE_COLOR_PALETTE[i]);
-		}
-	}
-
 	for (n_env = 0; envp[n_env]; n_env++);
 	if (!(new_env = calloc(n_env + 1, sizeof(char*)))) {
 		die_err("calloc()");
@@ -83,7 +77,7 @@ static struct child* _spawn_child(const char **envp, struct window *w, struct re
 		}
 	}
 
-	child = child_new(new_argv, new_env, r, w, parsed_palette);
+	child = child_new(new_argv, new_env, r, w);
 
 	if (term_i != SIZE_MAX) {
 		free((void*) new_env[term_i]);
@@ -104,12 +98,19 @@ int main(int argc, const char **argv, const char **envp) {
 	struct child *child;
 	struct timespec last, cur;
 	uint64_t tdiff;
+	unsigned i;
 
 	setlocale(LC_ALL, "");
 
+	for (i = 0; i < 16; i++) {
+		if (!color_parse(&parsed_palette[i], BTE_COLOR_PALETTE[i])) {
+			die_fmt("Could not parse color: %s", BTE_COLOR_PALETTE[i]);
+		}
+	}
+
 	window = window_new(BTE_WIDTH, BTE_HEIGHT, BTE_TITLE);
 	fonts = fonts_new(BTE_FONT, BTE_FONTSZ);
-	renderer = renderer_new(window, fonts, BTE_COLOR_FG, BTE_COLOR_BG, BTE_CURSOR);
+	renderer = renderer_new(window, fonts, BTE_COLOR_FG, BTE_COLOR_BG, BTE_CURSOR, parsed_palette);
 	window_set_renderer(window, renderer);
 	child = _spawn_child(envp, window, renderer);
 	window_set_child(window, child);
