@@ -26,6 +26,7 @@ static void glfw_cleanup() {
 
 // Callback for resize
 static void _glfw_fb_resize_cb(GLFWwindow *window, int width, int height) {
+	uvec2_t r_dim;
 	struct window *w;
 	if (width <= 0 || height <= 0) {
 		return;
@@ -36,7 +37,10 @@ static void _glfw_fb_resize_cb(GLFWwindow *window, int width, int height) {
 	glViewport(0, 0, width, height);
 	_update_projmat(w);
 	if (w->renderer) {
-		renderer_resize(w->renderer);
+		r_dim = renderer_resize(w->renderer);
+	}
+	if (w->child) {
+		child_resize_cb(w->child, r_dim);
 	}
 }
 

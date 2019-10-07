@@ -25,14 +25,21 @@ struct termchar {
 };
 
 
-struct renderer {
-	// Terminal box
+struct termbuf {
 	struct termchar     *termbox;      // Glyphs buffer
 	uvec2_t             dim;           // Dimensions (no. of chars)
 	uvec2_t             cursor;        // Current cursor position
 	const struct glyph  *cursor_glyph; // Glyph to draw for cursor
 	bool                cursor_vis;    // Is cursor supposed to be visible?
 	unsigned            toprow;        // Topmost row (prevent memcpy)
+};
+
+
+struct renderer {
+	// Terminal screens (double buffering)
+	struct termbuf      *draw_buf;     // Buffer to draw
+	struct termbuf      *mod_buf;      // Buffer to modify
+	pthread_mutex_t     buf_mut;       // Mutex for swapping buffers
 	// Pointers to other systems
 	struct window       *window;       // Pointer to window (not owned)
 	struct fonts        *fonts;        // Pointer to fonts subsystem (not owned)
@@ -49,8 +56,6 @@ struct renderer {
 	vec4_t              default_fgcol; // Normalized default foreground color
 	vec4_t              default_bgcol; // Normalized default background color
 	bool                req_render;    // Has an updated render been requested?
-	pthread_mutex_t     mut;           // Mutex for general access to renderer
-	pthread_mutex_t     size_mut;      // Mutex for resizing
 	const struct color  *palette;      // Standard palette of 16 colors
 };
 
@@ -72,7 +77,7 @@ void renderer_update(struct renderer *renderer);
 size_t renderer_add_codepoints(struct renderer *renderer, uint32_t *cps, size_t n_cps);
 
 // Resize renderer to match window (called by window subsystem)
-void renderer_resize(struct renderer *renderer);
+uvec2_t renderer_resize(struct renderer *renderer);
 
 
 #endif // __BTE_RENDER_H__

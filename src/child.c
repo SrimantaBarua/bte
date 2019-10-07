@@ -71,10 +71,11 @@ static void _get_fds(int *master, int *slave) {
 static void _spawn_child(struct child *child, const char **argv, const char **envp) {
 	pid_t pid;
 	int fd_master, fd_slave;
+	uvec2_t r_dim;
 	// Get FD pair
 	_get_fds(&fd_master, &fd_slave);
-	// Set child terminal size
-	_set_child_term_size(fd_master, child->renderer->dim.x, child->renderer->dim.y);
+	// Set child terminal size. ONE-TIME. DON'T DO THIS. UNSAFE
+	_set_child_term_size(fd_master, child->renderer->mod_buf->dim.x, child->renderer->mod_buf->dim.y);
 	// Fork child
 	if ((pid = fork()) < 0) {
 		die_err("fork()");
@@ -316,12 +317,12 @@ void child_key_cb(struct child *child, int key, int mods) {
 
 
 // Callback for resize
-void child_resize_cb(struct child *child) {
+void child_resize_cb(struct child *child, uvec2_t dim) {
 	if (!child) {
 		die("NULL child");
 	}
 	// Set child terminal size
-	_set_child_term_size(child->fd, child->renderer->dim.x, child->renderer->dim.y);
+	_set_child_term_size(child->fd, dim.x, dim.y);
 	// Signal child
 	kill(child->pid, SIGWINCH);
 }

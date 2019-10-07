@@ -32,6 +32,9 @@ void child_fini(struct child *child);
 // Callback for unicode codepoints (called by window)
 void child_char_cb(struct child *child, uint32_t codepoint);
 
+// Callback for resize
+void child_resize_cb(struct child *child, uvec2_t dim);
+
 // Callback for other keypresses (called by window)
 void child_key_cb(struct child *child, int key, int mods);
 
